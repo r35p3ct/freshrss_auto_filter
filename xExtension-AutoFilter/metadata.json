@@ -1,0 +1,8 @@
+{
+    "name": "Auto Filter",
+    "author": "Dt",
+    "description": "Автоматическое определение и фильтрация рекламных записей с помощью AI (OpenRouter API)",
+    "version": "0.1.0",
+    "entrypoint": "AutoFilter",
+    "type": "user"
+}
