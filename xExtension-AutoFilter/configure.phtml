@@ -1,15 +1,19 @@
 <?php
 declare(strict_types=1);
-/** @var FreshExtension_AutoFilter_configuration_Controller $this */
 ?>
-<form action="<?php echo _url('extension', 'configure', 'e', urlencode(Minz_Request::param('e', ''))); ?>" method="post">
+<?php if (Minz_Request::isPost()) : ?>
+<div class="alert alert-success">
+    <strong><?php echo _t('gen.action.success'); ?></strong>
+</div>
+<?php endif; ?>
+<form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
     <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
 
     <div class="form-group">
         <label class="group-name" for="auto_filter_openrouter_api_key"><?php echo _t('ext.field.openrouter_api_key'); ?></label>
         <div class="group-controls">
             <input type="password" id="auto_filter_openrouter_api_key" name="auto_filter_openrouter_api_key"
-                   value="<?php echo FreshRSS_Context::$user_conf->auto_filter_openrouter_api_key ?? ''; ?>"
+                   value="<?php echo htmlspecialchars($this->getSystemConfigurationValue('openrouter_api_key') ?? '', ENT_QUOTES); ?>"
                    placeholder="sk-or-..." />
             <p class="help">
                 Get your key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>
@@ -21,7 +25,7 @@ declare(strict_types=1);
         <label class="group-name" for="auto_filter_openrouter_model"><?php echo _t('ext.field.openrouter_model'); ?></label>
         <div class="group-controls">
             <input type="text" id="auto_filter_openrouter_model" name="auto_filter_openrouter_model"
-                   value="<?php echo FreshRSS_Context::$user_conf->auto_filter_openrouter_model ?? 'openai/gpt-3.5-turbo'; ?>"
+                   value="<?php echo htmlspecialchars($this->getSystemConfigurationValue('openrouter_model') ?? 'openai/gpt-3.5-turbo', ENT_QUOTES); ?>"
                    placeholder="openai/gpt-3.5-turbo" />
             <p class="help">
                 Examples: openai/gpt-3.5-turbo, openai/gpt-4, anthropic/claude-3-haiku
@@ -30,70 +34,11 @@ declare(strict_types=1);
     </div>
 
     <div class="form-group">
-        <label class="group-name" for="auto_filter_enabled"><?php echo _t('ext.field.enabled'); ?></label>
-        <div class="group-controls">
-            <label class="checkbox">
-                <input type="checkbox" id="auto_filter_enabled" name="auto_filter_enabled"
-                       value="1" <?php echo !empty(FreshRSS_Context::$user_conf->auto_filter_enabled) ? 'checked' : ''; ?> />
-                <span class="checkmark"></span>
-            </label>
-        </div>
-    </div>
-
-    <div class="form-group">
-        <label class="group-name" for="auto_filter_check_on_fetch"><?php echo _t('ext.field.check_on_fetch'); ?></label>
-        <div class="group-controls">
-            <label class="checkbox">
-                <input type="checkbox" id="auto_filter_check_on_fetch" name="auto_filter_check_on_fetch"
-                       value="1" <?php echo !empty(FreshRSS_Context::$user_conf->auto_filter_check_on_fetch) ? 'checked' : ''; ?> />
-                <span class="checkmark"></span>
-            </label>
-        </div>
-    </div>
-
-    <div class="form-group">
-        <label class="group-name" for="auto_filter_action_on_advertisement"><?php echo _t('ext.field.action_on_advertisement'); ?></label>
-        <div class="group-controls">
-            <select id="auto_filter_action_on_advertisement" name="auto_filter_action_on_advertisement">
-                <option value="none" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_advertisement ?? 'hide') === 'none' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_none'); ?>
-                </option>
-                <option value="hide" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_advertisement ?? 'hide') === 'hide' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_hide'); ?>
-                </option>
-                <option value="read" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_advertisement ?? 'hide') === 'read' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_read'); ?>
-                </option>
-                <option value="label" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_advertisement ?? 'hide') === 'label' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_label'); ?>
-                </option>
-            </select>
-        </div>
-    </div>
-
-    <div class="form-group">
-        <label class="group-name" for="auto_filter_action_on_possible_advertisement"><?php echo _t('ext.field.action_on_possible_advertisement'); ?></label>
-        <div class="group-controls">
-            <select id="auto_filter_action_on_possible_advertisement" name="auto_filter_action_on_possible_advertisement">
-                <option value="none" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_possible_advertisement ?? 'lower') === 'none' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_none'); ?>
-                </option>
-                <option value="lower" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_possible_advertisement ?? 'lower') === 'lower' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_lower'); ?>
-                </option>
-                <option value="label" <?php echo (FreshRSS_Context::$user_conf->auto_filter_action_on_possible_advertisement ?? 'lower') === 'label' ? 'selected' : ''; ?>>
-                    <?php echo _t('ext.field.action_label'); ?>
-                </option>
-            </select>
-        </div>
-    </div>
-
-    <div class="form-group">
         <label class="group-name" for="auto_filter_confidence_threshold_high"><?php echo _t('ext.field.confidence_threshold_high'); ?></label>
         <div class="group-controls">
             <input type="number" id="auto_filter_confidence_threshold_high"
                    name="auto_filter_confidence_threshold_high"
-                   value="<?php echo FreshRSS_Context::$user_conf->auto_filter_confidence_threshold_high ?? 0.8; ?>"
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('confidence_threshold_high') ?? 0.8), ENT_QUOTES); ?>"
                    step="0.1" min="0" max="1" />
             <p class="help"><?php echo _t('ext.field.confidence_threshold_high_hint'); ?></p>
         </div>
@@ -104,9 +49,36 @@ declare(strict_types=1);
         <div class="group-controls">
             <input type="number" id="auto_filter_confidence_threshold_low"
                    name="auto_filter_confidence_threshold_low"
-                   value="<?php echo FreshRSS_Context::$user_conf->auto_filter_confidence_threshold_low ?? 0.5; ?>"
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('confidence_threshold_low') ?? 0.5), ENT_QUOTES); ?>"
                    step="0.1" min="0" max="1" />
             <p class="help"><?php echo _t('ext.field.confidence_threshold_low_hint'); ?></p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="auto_filter_prompt"><?php echo _t('ext.field.prompt'); ?></label>
+        <div class="group-controls">
+            <textarea id="auto_filter_prompt" name="auto_filter_prompt" rows="12"
+                      placeholder="<?php echo _t('ext.field.prompt_placeholder'); ?>"><?php echo htmlspecialchars($this->getSystemConfigurationValue('prompt') ?? '', ENT_QUOTES); ?></textarea>
+            <p class="help">
+                <?php echo _t('ext.field.prompt_hint'); ?>
+            </p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="auto_filter_enable_logging"><?php echo _t('ext.field.enable_logging'); ?></label>
+        <div class="group-controls">
+            <input type="hidden" name="auto_filter_enable_logging" value="0" />
+            <label>
+                <input type="checkbox" id="auto_filter_enable_logging" name="auto_filter_enable_logging"
+                       value="1"
+                       <?php echo $this->getSystemConfigurationValue('enable_logging') ? 'checked' : ''; ?> />
+                <?php echo _t('ext.field.enable_logging_hint'); ?>
+            </label>
+            <p class="help">
+                <?php echo _t('ext.field.enable_logging_help'); ?>
+            </p>
         </div>
     </div>
 
