@@ -1,0 +1,35 @@
+name: Deploy AutoFilter Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'xExtension-AutoFilter/**'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync extension files to server
+        run: |
+          rsync -av --delete \
+            ./xExtension-AutoFilter/ \
+            /srv/freshrss/extensions/xExtension-AutoFilter/
+
+      - name: Set correct permissions
+        run: |
+          chown -R www-data:www-data /srv/freshrss/extensions/xExtension-AutoFilter
+          chmod -R 755 /srv/freshrss/extensions/xExtension-AutoFilter
+
+      - name: Restart FreshRSS container
+        run: |
+          docker restart freshrss
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          docker logs freshrss --tail 20
