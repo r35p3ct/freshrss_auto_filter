@@ -32,7 +32,7 @@ class AutoFilterExtension extends Minz_Extension
             $oldConfig = $this->getSystemConfiguration();
 
             // Получаем список выбранных каналов из POST-данных
-            $channelsFilter = Minz_Request::paramArray('auto_filter_channels_filter', []);
+            $channelsFilter = $_POST['auto_filter_channels_filter'] ?? [];
             // Преобразуем к строковому типу для консистентности
             $channelsFilter = array_map('strval', $channelsFilter);
 
