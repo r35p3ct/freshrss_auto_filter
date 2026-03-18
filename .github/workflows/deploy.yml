@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - 'xExtension-AutoFilter/**'
+  workflow_dispatch:
 
 jobs:
   deploy:
