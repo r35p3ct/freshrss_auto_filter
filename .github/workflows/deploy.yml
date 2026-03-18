@@ -15,16 +15,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Sync extension files to server
+      - name: Prepare directory permissions
+        run: |
+          # Делаем пользователя dt владельцем, группу оставляем www-data
+          sudo chown -R dt:www-data /srv/freshrss/extensions/xExtension-AutoFilter
+          # Даем полные права владельцу и группе, чтение остальным
+          sudo chmod -R 775 /srv/freshrss/extensions/xExtension-AutoFilter
+
+      - name: Sync extension files
         run: |
           rsync -av --no-owner --no-group --delete \
             ./xExtension-AutoFilter/ \
             /srv/freshrss/extensions/xExtension-AutoFilter/
-
-      - name: Set correct permissions
-        run: |
-          sudo chown -R www-data:www-data /srv/freshrss/extensions/xExtension-AutoFilter
-          sudo chmod -R 755 /srv/freshrss/extensions/xExtension-AutoFilter
 
       - name: Restart FreshRSS container
         run: |
