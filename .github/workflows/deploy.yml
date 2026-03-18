@@ -17,18 +17,18 @@ jobs:
 
       - name: Sync extension files to server
         run: |
-          rsync -av --delete \
+          sudo rsync -av --no-g --no-p --delete \
             ./xExtension-AutoFilter/ \
             /srv/freshrss/extensions/xExtension-AutoFilter/
 
       - name: Set correct permissions
         run: |
-          chown -R www-data:www-data /srv/freshrss/extensions/xExtension-AutoFilter
-          chmod -R 755 /srv/freshrss/extensions/xExtension-AutoFilter
+          sudo chown -R www-data:www-data /srv/freshrss/extensions/xExtension-AutoFilter
+          sudo chmod -R 755 /srv/freshrss/extensions/xExtension-AutoFilter
 
       - name: Restart FreshRSS container
         run: |
-          docker restart freshrss
+          sudo docker restart freshrss
 
       - name: Verify deployment
         run: |
