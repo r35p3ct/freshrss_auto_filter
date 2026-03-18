@@ -31,6 +31,11 @@ class AutoFilterExtension extends Minz_Extension
         if (Minz_Request::isPost()) {
             $oldConfig = $this->getSystemConfiguration();
 
+            // Получаем список выбранных каналов из POST-данных
+            $channelsFilter = Minz_Request::paramArray('auto_filter_channels_filter', []);
+            // Преобразуем к строковому типу для консистентности
+            $channelsFilter = array_map('strval', $channelsFilter);
+
             $newConfig = [
                 'openrouter_api_key' => Minz_Request::paramString('auto_filter_openrouter_api_key'),
                 'openrouter_model' => Minz_Request::paramString('auto_filter_openrouter_model'),
@@ -38,6 +43,7 @@ class AutoFilterExtension extends Minz_Extension
                 'confidence_threshold_low' => (float)Minz_Request::param('auto_filter_confidence_threshold_low', 0.5),
                 'prompt' => Minz_Request::paramString('auto_filter_prompt'),
                 'enable_logging' => Minz_Request::paramString('auto_filter_enable_logging') === '1',
+                'channels_filter' => $channelsFilter,
             ];
 
             $this->setSystemConfiguration($newConfig);
@@ -92,7 +98,7 @@ class AutoFilterExtension extends Minz_Extension
 
     /**
      * Хук вызывается при добавлении новой записи в БД.
-     * 
+     *
      * @param FreshRSS_Entry|null $entry Запись для обработки
      * @return FreshRSS_Entry|null Modified entry или null для отмены добавления
      */
@@ -105,6 +111,15 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         if (!$entry) {
+            return $entry;
+        }
+
+        // Проверка: включен ли канал для фильтрации
+        if (!$this->isChannelEnabled($entry)) {
+            if ($enableLogging) {
+                $feedId = $entry->feedId();
+                Minz_Log::warning('AutoFilter: Channel ' . $feedId . ' is NOT in filter list, skipping');
+            }
             return $entry;
         }
 
@@ -147,5 +162,26 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         return $entry;
+    }
+
+    /**
+     * Проверка: включен ли канал для фильтрации.
+     *
+     * @param FreshRSS_Entry $entry Запись для проверки
+     * @return bool true если канал в списке фильтрации или список пуст (все каналы)
+     */
+    private function isChannelEnabled(FreshRSS_Entry $entry): bool
+    {
+        $channelsFilter = $this->getSystemConfigurationValue('channels_filter');
+        
+        // Если фильтр пуст - проверяем все каналы
+        if (empty($channelsFilter) || !is_array($channelsFilter)) {
+            return true;
+        }
+
+        $feedId = $entry->feedId();
+        
+        // Проверяем, есть ли feedId в списке выбранных каналов
+        return in_array((string)$feedId, $channelsFilter, true);
     }
 }

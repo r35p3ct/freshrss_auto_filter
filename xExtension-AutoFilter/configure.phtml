@@ -82,6 +82,118 @@ declare(strict_types=1);
         </div>
     </div>
 
+    <div class="form-group">
+        <label class="group-name"><?php echo _t('ext.field.channels_filter'); ?></label>
+        <div class="group-controls">
+            <p class="help">
+                <?php echo _t('ext.field.channels_filter_hint'); ?>
+            </p>
+            <div class="auto-filter-channels-tree">
+                <?php
+                $channelsFilter = $this->getSystemConfigurationValue('channels_filter');
+                if (!is_array($channelsFilter)) {
+                    $channelsFilter = [];
+                }
+                
+                $catDAO = FreshRSS_Factory::createCategoryDao();
+                $categories = $catDAO->listSortedCategories();
+                
+                foreach ($categories as $category) {
+                    $catId = $category->id();
+                    $catName = htmlspecialchars($category->name(), ENT_QUOTES);
+                    $feeds = $category->feeds();
+                    
+                    if (empty($feeds)) {
+                        continue;
+                    }
+                    
+                    echo '<div class="channel-category">';
+                    echo '<label class="channel-category-label">';
+                    echo '<input type="checkbox" class="channel-category-toggle" data-category="' . $catId . '" /> ';
+                    echo '<strong>' . $catName . '</strong>';
+                    echo '</label>';
+                    
+                    echo '<div class="channel-feeds" id="category-feeds-' . $catId . '">';
+                    foreach ($feeds as $feed) {
+                        $feedId = $feed->id();
+                        $feedName = htmlspecialchars($feed->name(), ENT_QUOTES);
+                        $isSelected = in_array((string)$feedId, $channelsFilter, true) ? 'checked' : '';
+                        
+                        echo '<label class="channel-feed-item">';
+                        echo '<input type="checkbox" name="auto_filter_channels_filter[]" value="' . $feedId . '" ' . $isSelected . ' />';
+                        echo htmlspecialchars($feedName, ENT_QUOTES);
+                        echo '</label>';
+                    }
+                    echo '</div>';
+                    
+                    echo '</div>';
+                }
+                ?>
+            </div>
+            <p class="help">
+                <label>
+                    <input type="checkbox" id="auto_filter_select_all_channels" />
+                    <?php echo _t('ext.field.select_all_channels'); ?>
+                </label>
+            </p>
+        </div>
+    </div>
+
+    <style>
+        .auto-filter-channels-tree {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            background: #fafafa;
+        }
+        .channel-category {
+            margin-bottom: 15px;
+        }
+        .channel-category-label {
+            display: block;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .channel-feeds {
+            padding-left: 20px;
+        }
+        .channel-feed-item {
+            display: block;
+            padding: 4px 0;
+            cursor: pointer;
+        }
+        .channel-feed-item:hover {
+            background: #f0f0f0;
+        }
+    </style>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Переключение всех каналов категории
+            document.querySelectorAll('.channel-category-toggle').forEach(function(toggle) {
+                toggle.addEventListener('change', function() {
+                    var categoryId = this.dataset.category;
+                    var feedsContainer = document.getElementById('category-feeds-' + categoryId);
+                    var checkboxes = feedsContainer.querySelectorAll('input[type="checkbox"]');
+                    checkboxes.forEach(function(cb) {
+                        cb.checked = toggle.checked;
+                    });
+                });
+            });
+
+            // Выбрать все каналы
+            document.getElementById('auto_filter_select_all_channels').addEventListener('change', function() {
+                var allChecked = this.checked;
+                document.querySelectorAll('.auto-filter-channels-tree input[type="checkbox"]').forEach(function(cb) {
+                    cb.checked = allChecked;
+                });
+            });
+        });
+    </script>
+
     <div class="form-group form-actions">
         <div class="group-controls">
             <button type="submit" class="btn btn-important"><?php echo _t('gen.action.submit'); ?></button>

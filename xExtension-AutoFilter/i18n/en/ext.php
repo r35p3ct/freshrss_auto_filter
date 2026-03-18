@@ -20,5 +20,8 @@ return [
         'enable_logging' => 'Enable logging',
         'enable_logging_hint' => 'Write detailed extension logs',
         'enable_logging_help' => 'When enabled, logs include prompts, API responses, and analysis results. Use for debugging.',
+        'channels_filter' => 'Channels for filtering',
+        'channels_filter_hint' => 'Select channels for automatic advertisement filtering. If nothing is selected, all channels are checked.',
+        'select_all_channels' => 'Select all channels',
     ],
 ];
