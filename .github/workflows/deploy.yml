@@ -17,7 +17,7 @@ jobs:
 
       - name: Sync extension files to server
         run: |
-          rsync -av --delete \
+          rsync -av --no-owner --no-group --delete \
             ./xExtension-AutoFilter/ \
             /srv/freshrss/extensions/xExtension-AutoFilter/
 
