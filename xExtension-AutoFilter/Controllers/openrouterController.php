@@ -79,20 +79,166 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     }
 
     // -------------------------------------------------------------------------
-    // Публичный метод — вызывается из хука entry_after_insert
+    // Публичный метод — вызывается из хука entry_before_add
     // -------------------------------------------------------------------------
 
     /**
-     * Анализирует запись и применяет метки. Запись уже в БД, есть ID.
+     * Анализирует запись и применяет метки. Запись ещё не в БД, ID нет.
+     * Метки устанавливаются через setTagsId() и сохраняются при вставке.
      *
      * Логика меток:
-     *   LABEL_ADVERTISEMENT: метка + помечается прочитанной (скрыта из непрочитанных)
-     *   LABEL_POSSIBLE:      только метка (остаётся видимой для ревью)
+     *   LABEL_ADVERTISEMENT: метка + помечается прочитанной
+     *   LABEL_POSSIBLE:      только метка
      *   LABEL_NONE:          ничего не делаем
      *
-     * @return array{success: bool, entry_id?: int, analysis?: array, error?: string}
+     * @return array{success: bool, analysis?: array, error?: string}
      */
-    public function analyzeEntryAfterInsert(FreshRSS_Entry $entry): array
+    public function analyzeEntryBeforeAdd(FreshRSS_Entry $entry): array
+    {
+        if (empty($this->apiKey)) {
+            return ['success' => false, 'error' => 'API key not configured'];
+        }
+
+        $prompt = $this->buildPrompt($entry);
+
+        if ($this->enableLogging) {
+            $this->logPromptMetadata($entry, $prompt);
+        }
+
+        $response = $this->callOpenRouter($prompt);
+
+        if (!$response['success']) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: API error: ' . ($response['error'] ?? 'unknown'));
+            }
+            return $response;
+        }
+
+        if ($this->enableLogging) {
+            Minz_Log::warning('AutoFilter: API response preview: ' . substr($response['content'], 0, 100));
+        }
+
+        $analysis = $this->parseResponse($response['content']);
+
+        if ($this->enableLogging) {
+            $this->logAnalysisResult($entry, $analysis);
+        }
+
+        $this->applyLabelsToEntry($entry, $analysis);
+
+        return [
+            'success'  => true,
+            'analysis' => $analysis,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Применение меток к записи (до вставки в БД)
+    // -------------------------------------------------------------------------
+
+    private function applyLabelsToEntry(FreshRSS_Entry $entry, array $analysis): void
+    {
+        $label = $analysis['label'] ?? self::LABEL_NONE;
+
+        if ($label === self::LABEL_NONE) {
+            return;
+        }
+
+        // Находим ID метки по имени
+        $labelDao    = FreshRSS_Factory::createLabelDao();
+        $targetLabel = null;
+
+        foreach ($labelDao->listLabels() as $l) {
+            if ($l->name() === $label) {
+                $targetLabel = $l;
+                break;
+            }
+        }
+
+        if ($targetLabel === null) {
+            Minz_Log::warning(
+                'AutoFilter: Label "' . $label . '" not found. '
+                . 'Create it manually: Settings -> Labels.'
+            );
+            return;
+        }
+
+        // Получаем текущие теги записи и добавляем новый
+        $currentTagsId = $entry->tagsId();
+        if (!in_array($targetLabel->id(), $currentTagsId, true)) {
+            $currentTagsId[] = $targetLabel->id();
+            $entry->setTagsId($currentTagsId);
+
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Label "' . $label . '" (ID=' . $targetLabel->id() . ') applied to entry');
+            }
+        }
+
+        // Подтверждённую рекламу помечаем прочитанной:
+        // скрывается из непрочитанных, но доступна через фильтр label:Реклама
+        if ($label === self::LABEL_ADVERTISEMENT) {
+            $entry->_isRead(true);
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Entry marked as read');
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // HTTP-эндпоинты (ручная и пакетная проверка)
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/p.php?c=autoFilter_openrouter&a=checkEntry&entry_id={ID}
+     *
+     * @return array{success: bool, analysis?: array, error?: string}
+     */
+    public function checkEntryAction(): array
+    {
+        $entryId = Minz_Request::param('entry_id', 0);
+        if (!$entryId) {
+            return ['success' => false, 'error' => 'Entry ID not provided'];
+        }
+
+        $entry = FreshRSS_Factory::createEntryDao()->searchById($entryId);
+        if (!$entry) {
+            return ['success' => false, 'error' => 'Entry not found'];
+        }
+
+        // Для уже существующей записи используем applyLabelsViaDao
+        return $this->analyzeExistingEntry($entry);
+    }
+
+    /**
+     * POST /api/p.php?c=autoFilter_openrouter&a=checkBatch
+     *
+     * @return array{success: bool, results?: array}
+     */
+    public function checkBatchAction(): array
+    {
+        $entryIds = Minz_Request::param('entry_ids', []);
+        if (empty($entryIds)) {
+            return ['success' => false, 'error' => 'Entry IDs not provided'];
+        }
+
+        $entryDao = FreshRSS_Factory::createEntryDao();
+        $results  = [];
+
+        foreach ($entryIds as $entryId) {
+            $entry = $entryDao->searchById($entryId);
+            if ($entry) {
+                $results[] = $this->analyzeExistingEntry($entry);
+            }
+        }
+
+        return ['success' => true, 'results' => $results];
+    }
+
+    /**
+     * Анализ существующей записи (с ID в БД)
+     * Применяет метки через DAO.
+     */
+    private function analyzeExistingEntry(FreshRSS_Entry $entry): array
     {
         if (empty($this->apiKey)) {
             return ['success' => false, 'error' => 'API key not configured'];
@@ -132,10 +278,9 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         ];
     }
 
-    // -------------------------------------------------------------------------
-    // Применение меток через DAO
-    // -------------------------------------------------------------------------
-
+    /**
+     * Применение меток к существующей записи через DAO
+     */
     private function applyLabelsViaDao(FreshRSS_Entry $entry, array $analysis): void
     {
         $label = $analysis['label'] ?? self::LABEL_NONE;
@@ -174,74 +319,18 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             Minz_Log::warning('AutoFilter: Label "' . $label . '" applied to entry ID=' . $entryId);
         }
 
-        // Подтверждённую рекламу помечаем прочитанной:
-        // скрывается из непрочитанных, но доступна через фильтр label:Реклама
+        // Подтверждённую рекламу помечаем прочитанной
         if ($label === self::LABEL_ADVERTISEMENT) {
-            $this->markEntryAsRead($entry);
-        }
-    }
-
-    private function markEntryAsRead(FreshRSS_Entry $entry): void
-    {
-        try {
-            $entryDao = FreshRSS_Factory::createEntryDao();
-            $entryDao->markRead([$entry->id()], true);
-
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: Entry ID=' . $entry->id() . ' marked as read');
-            }
-        } catch (Throwable $e) {
-            Minz_Log::warning('AutoFilter: Failed to mark entry as read: ' . $e->getMessage());
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // HTTP-эндпоинты (ручная и пакетная проверка)
-    // -------------------------------------------------------------------------
-
-    /**
-     * GET /api/p.php?c=autoFilter_openrouter&a=checkEntry&entry_id={ID}
-     *
-     * @return array{success: bool, analysis?: array, error?: string}
-     */
-    public function checkEntryAction(): array
-    {
-        $entryId = Minz_Request::param('entry_id', 0);
-        if (!$entryId) {
-            return ['success' => false, 'error' => 'Entry ID not provided'];
-        }
-
-        $entry = FreshRSS_Factory::createEntryDao()->searchById($entryId);
-        if (!$entry) {
-            return ['success' => false, 'error' => 'Entry not found'];
-        }
-
-        return $this->analyzeEntryAfterInsert($entry);
-    }
-
-    /**
-     * POST /api/p.php?c=autoFilter_openrouter&a=checkBatch
-     *
-     * @return array{success: bool, results?: array}
-     */
-    public function checkBatchAction(): array
-    {
-        $entryIds = Minz_Request::param('entry_ids', []);
-        if (empty($entryIds)) {
-            return ['success' => false, 'error' => 'Entry IDs not provided'];
-        }
-
-        $entryDao = FreshRSS_Factory::createEntryDao();
-        $results  = [];
-
-        foreach ($entryIds as $entryId) {
-            $entry = $entryDao->searchById($entryId);
-            if ($entry) {
-                $results[] = $this->analyzeEntryAfterInsert($entry);
+            try {
+                $entryDao = FreshRSS_Factory::createEntryDao();
+                $entryDao->markRead([$entryId], true);
+                if ($this->enableLogging) {
+                    Minz_Log::warning('AutoFilter: Entry ID=' . $entryId . ' marked as read');
+                }
+            } catch (Throwable $e) {
+                Minz_Log::warning('AutoFilter: Failed to mark entry as read: ' . $e->getMessage());
             }
         }
-
-        return ['success' => true, 'results' => $results];
     }
 
     // -------------------------------------------------------------------------

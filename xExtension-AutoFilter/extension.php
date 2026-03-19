@@ -16,9 +16,9 @@ class AutoFilterExtension extends Minz_Extension
         $this->registerTranslates();
         $this->registerController('openrouter');
 
-        // entry_after_insert — запись уже сохранена в БД, есть ID.
-        // Это позволяет надёжно применять метки через LabelDAO и помечать прочитанными.
-        $this->registerHook('entry_after_insert', [$this, 'onEntryAfterInsert']);
+        // entry_before_add — запись ещё не в БД, но мы можем установить метки через setTagsId().
+        // Метки сохранятся вместе с записью при вставке.
+        $this->registerHook('entry_before_add', [$this, 'onEntryBeforeAdd']);
     }
 
     /**
@@ -93,44 +93,49 @@ class AutoFilterExtension extends Minz_Extension
     }
 
     /**
-     * Хук entry_after_insert — запись уже в БД, есть ID.
+     * Хук entry_before_add — запись ещё не в БД, но мы можем установить метки.
+     * Метки сохранятся вместе с записью при вставке.
      *
      * @param FreshRSS_Entry|null $entry
      * @return FreshRSS_Entry|null
      */
-    public function onEntryAfterInsert($entry): ?FreshRSS_Entry
+    public function onEntryBeforeAdd($entry): ?FreshRSS_Entry
     {
         $config = $this->buildConfigArray();
 
         $enableLogging = $config['enable_logging'];
 
         if ($enableLogging) {
-            Minz_Log::warning('AutoFilter: entry_after_insert HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
+            Minz_Log::warning('AutoFilter: entry_before_add HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
         }
 
         if (!$entry) {
             return $entry;
         }
 
-        // Проверка: если уже есть метка "Реклама" или "Подозрение", пропускаем
-        $labelDao = FreshRSS_Factory::createLabelDao();
-        try {
-            $labels = $labelDao->listLabelsForEntry($entry->id());
-            foreach ($labels as $label) {
-                if (in_array($label->name(), [
-                    FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
-                    FreshExtension_AutoFilter_Labels::POSSIBLE
-                ], true)) {
-                    if ($enableLogging) {
-                        Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
+        // Проверка: если уже есть метка "Реклама" или "Подозрение" в тегах записи, пропускаем
+        $tags = $entry->tags(true);
+        foreach ($tags as $tag) {
+            if (str_starts_with($tag, 't:')) {
+                $tagId = (int)substr($tag, 2);
+                $labelDao = FreshRSS_Factory::createLabelDao();
+                try {
+                    $label = $labelDao->searchById($tagId);
+                    if ($label && in_array($label->name(), [
+                        FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
+                        FreshExtension_AutoFilter_Labels::POSSIBLE
+                    ], true)) {
+                        if ($enableLogging) {
+                            Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
+                        }
+                        return $entry;
                     }
-                    return $entry;
+                } catch (Exception $e) {
+                    // Если не удалось получить метку, продолжаем анализ
+                    if ($enableLogging) {
+                        Minz_Log::warning('AutoFilter: Failed to check existing label: ' . $e->getMessage());
+                    }
                 }
-            }
-        } catch (Exception $e) {
-            // Если не удалось получить метки, продолжаем анализ
-            if ($enableLogging) {
-                Minz_Log::warning('AutoFilter: Failed to check existing labels: ' . $e->getMessage());
             }
         }
 
@@ -151,13 +156,12 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
-        $result     = $controller->analyzeEntryAfterInsert($entry);
+        $result     = $controller->analyzeEntryBeforeAdd($entry);
 
         if ($enableLogging) {
             if ($result['success']) {
                 Minz_Log::warning(sprintf(
-                    'AutoFilter: Done — ID=%d, Label=%s, Confidence=%.2f',
-                    $entry->id(),
+                    'AutoFilter: Done — Label=%s, Confidence=%.2f',
                     $result['analysis']['label'],
                     $result['analysis']['confidence']
                 ));
