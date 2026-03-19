@@ -549,12 +549,18 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
     private function logAnalysisResult(FreshRSS_Entry $entry, array $analysis): void
     {
+        $contentPreview = substr(strip_tags($entry->content()), 0, 100);
+        if (strlen(strip_tags($entry->content())) > 100) {
+            $contentPreview .= '...';
+        }
+        
         Minz_Log::warning(sprintf(
-            'AutoFilter: ID=%d Label=%s Confidence=%.2f Reason=%s',
+            'AutoFilter: ID=%d Label=%s Confidence=%.2f Reason=%s Content="%s"',
             $entry->id(),
             $analysis['label'],
             $analysis['confidence'],
-            $analysis['reason']
+            $analysis['reason'],
+            str_replace(["\n", "\r"], ' ', $contentPreview)
         ));
     }
 
