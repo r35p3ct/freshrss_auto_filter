@@ -127,20 +127,27 @@ class AutoFilterExtension extends Minz_Extension
                 if ($tagId <= 0) {
                     continue;
                 }
-                $labelDao = FreshRSS_Factory::createLabelDao();
+                // Проверяем, является ли этот тег одной из наших меток
+                // Для этого получаем все метки и ищем по ID
+                $tagDao = FreshRSS_Factory::createTagDao();
                 try {
-                    $label = $labelDao->searchById($tagId);
-                    if ($label && in_array($label->name(), [
-                        FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
-                        FreshExtension_AutoFilter_Labels::POSSIBLE
-                    ], true)) {
-                        if ($enableLogging) {
-                            Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
+                    $allTags = $tagDao->listTags();
+                    foreach ($allTags as $t) {
+                        if ($t->id() === $tagId) {
+                            if (in_array($t->name(), [
+                                FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
+                                FreshExtension_AutoFilter_Labels::POSSIBLE
+                            ], true)) {
+                                if ($enableLogging) {
+                                    Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
+                                }
+                                return $entry;
+                            }
+                            break;
                         }
-                        return $entry;
                     }
                 } catch (Exception $e) {
-                    // Если не удалось получить метку, продолжаем анализ
+                    // Если не удалось получить метки, продолжаем анализ
                     if ($enableLogging) {
                         Minz_Log::warning('AutoFilter: Failed to check existing label: ' . $e->getMessage());
                     }

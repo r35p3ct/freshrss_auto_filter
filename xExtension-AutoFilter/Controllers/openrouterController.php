@@ -146,11 +146,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        // Находим ID метки по имени
-        $labelDao    = FreshRSS_Factory::createLabelDao();
+        // Находим ID метки по имени (используем TagDao, т.к. в FreshRSS метки = tags)
+        $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
-        foreach ($labelDao->listLabels() as $l) {
+        foreach ($tagDao->listTags() as $l) {
             if ($l->name() === $label) {
                 $targetLabel = $l;
                 break;
@@ -297,10 +297,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        $labelDao    = FreshRSS_Factory::createLabelDao();
+        // Находим ID метки по имени (используем TagDao)
+        $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
-        foreach ($labelDao->listLabels() as $l) {
+        foreach ($tagDao->listTags() as $l) {
             if ($l->name() === $label) {
                 $targetLabel = $l;
                 break;
@@ -315,7 +316,8 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        $labelDao->addLabelToEntries($targetLabel->id(), [$entryId]);
+        // Добавляем метку к записи
+        $tagDao->tagEntry($targetLabel->id(), $entryId);
 
         if ($this->enableLogging) {
             Minz_Log::warning('AutoFilter: Label "' . $label . '" applied to entry ID=' . $entryId);
