@@ -166,10 +166,24 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         }
 
         // Получаем текущие теги записи и добавляем новый
-        $currentTagsId = $entry->tagsId();
+        // Парсим теги вручную из формата t:id
+        $currentTagsId = [];
+        $tags = $entry->tags(true);
+        if (!is_array($tags)) {
+            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
+        }
+        foreach ($tags as $tag) {
+            $tagString = (string)$tag;
+            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
+                $currentTagsId[] = (int)substr($tagString, 2);
+            }
+        }
+        
         if (!in_array($targetLabel->id(), $currentTagsId, true)) {
             $currentTagsId[] = $targetLabel->id();
-            $entry->setTagsId($currentTagsId);
+            // Форматируем теги обратно в строку формата "t:id1;t:id2"
+            $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
+            $entry->_tags($newTagsString);
 
             if ($this->enableLogging) {
                 Minz_Log::warning('AutoFilter: Label "' . $label . '" (ID=' . $targetLabel->id() . ') applied to entry');
