@@ -6,49 +6,44 @@ require_once __DIR__ . '/Controllers/openrouterController.php';
 
 /**
  * Расширение AutoFilter для автоматической фильтрации рекламы через AI.
- * 
- * @version 0.2.0
+ *
+ * @version 0.3.0
  */
 class AutoFilterExtension extends Minz_Extension
 {
-    /**
-     * Инициализация расширения.
-     */
     public function init(): void
     {
         $this->registerTranslates();
         $this->registerController('openrouter');
-        $this->registerHook('entry_before_insert', [$this, 'onEntryBeforeInsert']);
+
+        // entry_after_insert — запись уже сохранена в БД, есть ID.
+        // Это позволяет надёжно применять метки через LabelDAO и помечать прочитанными.
+        $this->registerHook('entry_after_insert', [$this, 'onEntryAfterInsert']);
     }
 
     /**
      * Обработка сохранения настроек.
-     *
-     * Очищает кэш при изменении ключевых параметров конфигурации.
      */
     public function handleConfigureAction(): void
     {
         if (Minz_Request::isPost()) {
             $oldConfig = $this->getSystemConfiguration();
 
-            // Получаем список выбранных каналов из POST-данных
             $channelsFilter = $_POST['auto_filter_channels_filter'] ?? [];
-            // Преобразуем к строковому типу для консистентности
             $channelsFilter = array_map('strval', $channelsFilter);
 
             $newConfig = [
-                'openrouter_api_key' => Minz_Request::paramString('auto_filter_openrouter_api_key'),
-                'openrouter_model' => Minz_Request::paramString('auto_filter_openrouter_model'),
-                'confidence_threshold_high' => (float)Minz_Request::param('auto_filter_confidence_threshold_high', 0.8),
-                'confidence_threshold_low' => (float)Minz_Request::param('auto_filter_confidence_threshold_low', 0.5),
-                'prompt' => Minz_Request::paramString('auto_filter_prompt'),
-                'enable_logging' => Minz_Request::paramString('auto_filter_enable_logging') === '1',
-                'channels_filter' => $channelsFilter,
+                'openrouter_api_key'          => Minz_Request::paramString('auto_filter_openrouter_api_key'),
+                'openrouter_model'            => Minz_Request::paramString('auto_filter_openrouter_model'),
+                'confidence_threshold_high'   => (float)Minz_Request::param('auto_filter_confidence_threshold_high', 0.8),
+                'confidence_threshold_low'    => (float)Minz_Request::param('auto_filter_confidence_threshold_low', 0.5),
+                'prompt'                      => Minz_Request::paramString('auto_filter_prompt'),
+                'enable_logging'              => Minz_Request::paramString('auto_filter_enable_logging') === '1',
+                'channels_filter'             => $channelsFilter,
             ];
 
             $this->setSystemConfiguration($newConfig);
 
-            // Очистка кэша при изменении ключевой конфигурации
             if ($this->shouldInvalidateCache($oldConfig, $newConfig)) {
                 $this->invalidateControllerCache();
             }
@@ -56,40 +51,29 @@ class AutoFilterExtension extends Minz_Extension
     }
 
     /**
-     * Проверка необходимости очистки кэша.
-     * 
-     * @param array<string, mixed> $oldConfig Старая конфигурация
-     * @param array<string, mixed> $newConfig Новая конфигурация
+     * @param array<string, mixed> $oldConfig
+     * @param array<string, mixed> $newConfig
      */
     private function shouldInvalidateCache(array $oldConfig, array $newConfig): bool
     {
-        $criticalKeys = ['openrouter_api_key', 'openrouter_model', 'prompt'];
-        
-        foreach ($criticalKeys as $key) {
-            $oldValue = $oldConfig[$key] ?? null;
-            $newValue = $newConfig[$key] ?? null;
-            
-            if ($oldValue !== $newValue) {
+        foreach (['openrouter_api_key', 'openrouter_model', 'prompt'] as $key) {
+            if (($oldConfig[$key] ?? null) !== ($newConfig[$key] ?? null)) {
                 Minz_Log::warning('AutoFilter: Configuration change detected for "' . $key . '", invalidating cache');
                 return true;
             }
         }
-        
         return false;
     }
 
-    /**
-     * Очистка кэша в контроллере.
-     */
     private function invalidateControllerCache(): void
     {
         $config = [
-            'openrouter_api_key' => $this->getSystemConfigurationValue('openrouter_api_key'),
-            'openrouter_model' => $this->getSystemConfigurationValue('openrouter_model'),
+            'openrouter_api_key'        => $this->getSystemConfigurationValue('openrouter_api_key'),
+            'openrouter_model'          => $this->getSystemConfigurationValue('openrouter_model'),
             'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
-            'confidence_threshold_low' => $this->getSystemConfigurationValue('confidence_threshold_low'),
-            'prompt' => $this->getSystemConfigurationValue('prompt'),
-            'enable_logging' => $this->getSystemConfigurationValue('enable_logging'),
+            'confidence_threshold_low'  => $this->getSystemConfigurationValue('confidence_threshold_low'),
+            'prompt'                    => $this->getSystemConfigurationValue('prompt'),
+            'enable_logging'            => $this->getSystemConfigurationValue('enable_logging'),
         ];
 
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
@@ -97,28 +81,26 @@ class AutoFilterExtension extends Minz_Extension
     }
 
     /**
-     * Хук вызывается при добавлении новой записи в БД.
+     * Хук entry_after_insert — запись уже в БД, есть ID.
      *
-     * @param FreshRSS_Entry|null $entry Запись для обработки
-     * @return FreshRSS_Entry|null Modified entry или null для отмены добавления
+     * @param FreshRSS_Entry|null $entry
+     * @return FreshRSS_Entry|null
      */
-    public function onEntryBeforeInsert($entry): ?FreshRSS_Entry
+    public function onEntryAfterInsert($entry): ?FreshRSS_Entry
     {
         $enableLogging = $this->getSystemConfigurationValue('enable_logging');
 
         if ($enableLogging) {
-            Minz_Log::warning('AutoFilter: HOOK CALLED for entry: ' . ($entry ? $entry->title() : 'NULL entry'));
+            Minz_Log::warning('AutoFilter: entry_after_insert HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
         }
 
         if (!$entry) {
             return $entry;
         }
 
-        // Проверка: включен ли канал для фильтрации
         if (!$this->isChannelEnabled($entry)) {
             if ($enableLogging) {
-                $feedId = $entry->feedId();
-                Minz_Log::warning('AutoFilter: Channel ' . $feedId . ' is NOT in filter list, skipping');
+                Minz_Log::warning('AutoFilter: Channel ' . $entry->feedId() . ' not in filter list, skipping');
             }
             return $entry;
         }
@@ -127,61 +109,52 @@ class AutoFilterExtension extends Minz_Extension
 
         if (empty($apiKey)) {
             if ($enableLogging) {
-                Minz_Log::warning('AutoFilter: API key NOT configured, skipping');
+                Minz_Log::warning('AutoFilter: API key not configured, skipping');
             }
             return $entry;
         }
 
-        // Получаем всю конфигурацию и передаём в контроллер
         $config = [
-            'openrouter_api_key' => $apiKey,
-            'openrouter_model' => $this->getSystemConfigurationValue('openrouter_model'),
+            'openrouter_api_key'        => $apiKey,
+            'openrouter_model'          => $this->getSystemConfigurationValue('openrouter_model'),
             'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
-            'confidence_threshold_low' => $this->getSystemConfigurationValue('confidence_threshold_low'),
-            'prompt' => $this->getSystemConfigurationValue('prompt'),
-            'enable_logging' => $enableLogging,
+            'confidence_threshold_low'  => $this->getSystemConfigurationValue('confidence_threshold_low'),
+            'prompt'                    => $this->getSystemConfigurationValue('prompt'),
+            'enable_logging'            => $enableLogging,
         ];
 
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
-        $result = $controller->analyzeEntryDirect($entry);
+        $result     = $controller->analyzeEntryAfterInsert($entry);
 
-        if ($result['success']) {
-            if ($enableLogging) {
+        if ($enableLogging) {
+            if ($result['success']) {
                 Minz_Log::warning(sprintf(
-                    'AutoFilter: Entry ID=%d, Label=%s, Confidence=%.2f',
+                    'AutoFilter: Done — ID=%d, Label=%s, Confidence=%.2f',
                     $entry->id(),
                     $result['analysis']['label'],
                     $result['analysis']['confidence']
                 ));
-            }
-        } else {
-            // При ошибке API - просто пропускаем запись без меток
-            if ($enableLogging) {
-                Minz_Log::warning('AutoFilter: Skipping entry due to API error: ' . ($result['error'] ?? 'unknown'));
+            } else {
+                Minz_Log::warning('AutoFilter: Error — ' . ($result['error'] ?? 'unknown'));
             }
         }
 
+        // Всегда возвращаем запись — удалять из ленты не нужно,
+        // реклама помечается прочитанной и скрыта через метку.
         return $entry;
     }
 
     /**
-     * Проверка: включен ли канал для фильтрации.
-     *
-     * @param FreshRSS_Entry $entry Запись для проверки
-     * @return bool true если канал в списке фильтрации или список пуст (все каналы)
+     * @return bool true если канал в списке фильтрации или список пуст
      */
     private function isChannelEnabled(FreshRSS_Entry $entry): bool
     {
         $channelsFilter = $this->getSystemConfigurationValue('channels_filter');
-        
-        // Если фильтр пуст - проверяем все каналы
+
         if (empty($channelsFilter) || !is_array($channelsFilter)) {
             return true;
         }
 
-        $feedId = $entry->feedId();
-        
-        // Проверяем, есть ли feedId в списке выбранных каналов
-        return in_array((string)$feedId, $channelsFilter, true);
+        return in_array((string)$entry->feedId(), $channelsFilter, true);
     }
 }
