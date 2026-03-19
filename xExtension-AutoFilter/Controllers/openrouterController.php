@@ -10,11 +10,13 @@ declare(strict_types=1);
  */
 class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionController
 {
-    private const LABEL_NONE            = 'none';
-    private const LABEL_ADVERTISEMENT   = 'Реклама';
-    private const LABEL_POSSIBLE        = 'Подозрение';
     private const MAX_CONTENT_LENGTH    = 2000;
     private const MAX_LOG_PROMPT_LENGTH = 200;
+
+    // Используем константы из общего класса
+    private const LABEL_NONE            = FreshExtension_AutoFilter_Labels::NONE;
+    private const LABEL_ADVERTISEMENT   = FreshExtension_AutoFilter_Labels::ADVERTISEMENT;
+    private const LABEL_POSSIBLE        = FreshExtension_AutoFilter_Labels::POSSIBLE;
 
     private string $apiKey;
     private string $model;
@@ -250,7 +252,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     {
         $title   = $entry->title();
         $content = $this->truncateContent(strip_tags($entry->content()));
-        $author  = $entry->authors()[0] ?? '';
+        $author  = reset($entry->authors()) ?: '';
         $url     = $entry->link();
 
         if (!empty($this->prompt)) {
@@ -267,43 +269,43 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     private function getDefaultPrompt(string $title, string $author, string $url, string $content): string
     {
         return <<<PROMPT
-Ты должен определить, является ли следующая новостная запись рекламой.
+    Ты должен определить, является ли следующая новостная запись рекламой.
 
-ВЕРНИ ТОЛЬКО JSON БЕЗ ПОЯСНЕНИЙ В ТАКОМ ФОРМАТЕ:
-{
-    "is_advertisement": true|false,
-    "confidence": 0.0-1.0,
-    "reason": "краткое объяснение до 5 слов"
-}
+    ВЕРНИ ТОЛЬКО JSON БЕЗ ПОЯСНЕНИЙ В ТАКОМ ФОРМАТЕ:
+    {
+        "is_advertisement": true|false,
+        "confidence": 0.0-1.0,
+        "reason": "краткое объяснение до 5 слов"
+    }
 
-КРИТЕРИИ РЕКЛАМЫ (is_advertisement = true):
-1. Коммерческое продвижение или продажа товара/услуги
-2. Призыв подписаться на другой канал/соцсеть (НЕ на автора)
-3. Заманивание бесплатными товарами/услугами для привлечения клиентов
-4. Сбор денег на покупку, лечение, помощь или отчет о сборе
-5. Бесплатное или платное обучение чему-то
-6. Призывы идти работать, служить в армию или еще куда-то
-7. Указаны реквизиты карт, номера телефонов
-8. Розыгрыши, бесплатные призы
+    КРИТЕРИИ РЕКЛАМЫ (is_advertisement = true):
+    1. Коммерческое продвижение или продажа товара/услуги
+    2. Призыв подписаться на другой канал/соцсеть (НЕ на автора)
+    3. Заманивание бесплатными товарами/услугами для привлечения клиентов
+    4. Сбор денег на покупку, лечение, помощь или отчет о сборе
+    5. Бесплатное или платное обучение чему-то
+    6. Призывы идти работать, служить в армию или еще куда-то
+    7. Указаны реквизиты карт, номера телефонов
+    8. Розыгрыши, бесплатные призы
 
-НЕ РЕКЛАМА (is_advertisement = false):
-- Обычные новости и статьи
-- Призывы подписаться на того же автора
-- Личные мнения и блоги без коммерции
+    НЕ РЕКЛАМА (is_advertisement = false):
+    - Обычные новости и статьи
+    - Призывы подписаться на того же автора
+    - Личные мнения и блоги без коммерции
 
-УРОВНИ УВЕРЕННОСТИ:
-- 0.9-1.0: явная реклама с прямым призывом к покупке
-- 0.7-0.9: коммерческий контент с элементами продвижения
-- 0.4-0.7: подозрительный контент, но неясно
-- 0.0-0.3: точно не реклама
+    УРОВНИ УВЕРЕННОСТИ:
+    - 0.9-1.0: явная реклама с прямым призывом к покупке
+    - 0.7-0.9: коммерческий контент с элементами продвижения
+    - 0.4-0.7: подозрительный контент, но неясно
+    - 0.0-0.3: точно не реклама
 
-КОНТЕКСТ ЗАПИСИ:
-- Заголовок: {$title}
-- Автор: {$author}
-- Ссылка: {$url}
-- Содержание: {$content}
+    КОНТЕКСТ ЗАПИСИ:
+    - Заголовок: {$title}
+    - Автор: {$author}
+    - Ссылка: {$url}
+    - Содержание: {$content}
 
-PROMPT;
+    PROMPT;
     }
 
     private function truncateContent(string $content): string
@@ -323,6 +325,10 @@ PROMPT;
      */
     private function parseResponse(string $content): array
     {
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Minz_Log::warning('AutoFilter: json_last_error before parsing: ' . json_last_error());
+        }
+
         $json = json_decode($content, true);
 
         if (!is_array($json) || !isset($json['is_advertisement'], $json['confidence'])) {
@@ -442,10 +448,9 @@ PROMPT;
     private function logPromptMetadata(FreshRSS_Entry $entry, string $prompt): void
     {
         Minz_Log::warning(sprintf(
-            'AutoFilter: Processing title="%s", content_chars=%d, prompt_chars=%d',
+            'AutoFilter: Processing title="%s", content_chars=%d',
             substr($entry->title(), 0, 50),
-            strlen(strip_tags($entry->content())),
-            strlen($prompt)
+            strlen(strip_tags($entry->content()))
         ));
     }
 
@@ -458,5 +463,11 @@ PROMPT;
             $analysis['confidence'],
             $analysis['reason']
         ));
+    }
+
+    public function invalidateCache(): void
+    {
+        // Здесь можно реализовать логику очистки кэша, если она понадобится
+        Minz_Log::info('AutoFilter: Cache invalidated');
     }
 }

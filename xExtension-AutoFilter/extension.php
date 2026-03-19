@@ -80,6 +80,18 @@ class AutoFilterExtension extends Minz_Extension
         $controller->invalidateCache();
     }
 
+    private function buildConfigArray(): array
+    {
+        return [
+            'openrouter_api_key' => $this->getSystemConfigurationValue('openrouter_api_key'),
+            'openrouter_model' => $this->getSystemConfigurationValue('openrouter_model'),
+            'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
+            'confidence_threshold_low' => $this->getSystemConfigurationValue('confidence_threshold_low'),
+            'prompt' => $this->getSystemConfigurationValue('prompt'),
+            'enable_logging' => $this->getSystemConfigurationValue('enable_logging'),
+        ];
+    }
+
     /**
      * Хук entry_after_insert — запись уже в БД, есть ID.
      *
@@ -88,7 +100,9 @@ class AutoFilterExtension extends Minz_Extension
      */
     public function onEntryAfterInsert($entry): ?FreshRSS_Entry
     {
-        $enableLogging = $this->getSystemConfigurationValue('enable_logging');
+        $config = $this->buildConfigArray();
+
+        $enableLogging = $config['enable_logging'];
 
         if ($enableLogging) {
             Minz_Log::warning('AutoFilter: entry_after_insert HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
@@ -98,6 +112,28 @@ class AutoFilterExtension extends Minz_Extension
             return $entry;
         }
 
+        // Проверка: если уже есть метка "Реклама" или "Подозрение", пропускаем
+        $labelDao = FreshRSS_Factory::createLabelDao();
+        try {
+            $labels = $labelDao->listLabelsForEntry($entry->id());
+            foreach ($labels as $label) {
+                if (in_array($label->name(), [
+                    FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
+                    FreshExtension_AutoFilter_Labels::POSSIBLE
+                ], true)) {
+                    if ($enableLogging) {
+                        Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
+                    }
+                    return $entry;
+                }
+            }
+        } catch (Exception $e) {
+            // Если не удалось получить метки, продолжаем анализ
+            if ($enableLogging) {
+                Minz_Log::warning('AutoFilter: Failed to check existing labels: ' . $e->getMessage());
+            }
+        }
+
         if (!$this->isChannelEnabled($entry)) {
             if ($enableLogging) {
                 Minz_Log::warning('AutoFilter: Channel ' . $entry->feedId() . ' not in filter list, skipping');
@@ -105,7 +141,7 @@ class AutoFilterExtension extends Minz_Extension
             return $entry;
         }
 
-        $apiKey = $this->getSystemConfigurationValue('openrouter_api_key');
+        $apiKey = $config['openrouter_api_key'];
 
         if (empty($apiKey)) {
             if ($enableLogging) {
@@ -113,15 +149,6 @@ class AutoFilterExtension extends Minz_Extension
             }
             return $entry;
         }
-
-        $config = [
-            'openrouter_api_key'        => $apiKey,
-            'openrouter_model'          => $this->getSystemConfigurationValue('openrouter_model'),
-            'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
-            'confidence_threshold_low'  => $this->getSystemConfigurationValue('confidence_threshold_low'),
-            'prompt'                    => $this->getSystemConfigurationValue('prompt'),
-            'enable_logging'            => $enableLogging,
-        ];
 
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
         $result     = $controller->analyzeEntryAfterInsert($entry);
