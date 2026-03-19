@@ -155,7 +155,6 @@ declare(strict_types=1);
             display: block;
             margin-bottom: 8px;
             cursor: pointer;
-            font-weight: bold;
         }
         .channel-feeds {
             padding-left: 20px;
@@ -177,6 +176,8 @@ declare(strict_types=1);
                 toggle.addEventListener('change', function() {
                     var categoryId = this.dataset.category;
                     var feedsContainer = document.getElementById('category-feeds-' + categoryId);
+                    if (!feedsContainer) return;
+
                     var checkboxes = feedsContainer.querySelectorAll('input[type="checkbox"]');
                     checkboxes.forEach(function(cb) {
                         cb.checked = toggle.checked;
