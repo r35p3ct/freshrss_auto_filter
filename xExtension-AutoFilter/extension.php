@@ -115,9 +115,18 @@ class AutoFilterExtension extends Minz_Extension
 
         // Проверка: если уже есть метка "Реклама" или "Подозрение" в тегах записи, пропускаем
         $tags = $entry->tags(true);
+        // tags(true) должен возвращать массив, но на всякий случай проверяем
+        if (!is_array($tags)) {
+            // Если вернулась строка, парсим её
+            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
+        }
         foreach ($tags as $tag) {
-            if (str_starts_with($tag, 't:')) {
-                $tagId = (int)substr($tag, 2);
+            $tagString = (string)$tag;
+            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
+                $tagId = (int)substr($tagString, 2);
+                if ($tagId <= 0) {
+                    continue;
+                }
                 $labelDao = FreshRSS_Factory::createLabelDao();
                 try {
                     $label = $labelDao->searchById($tagId);
