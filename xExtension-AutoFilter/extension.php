@@ -105,9 +105,9 @@ class AutoFilterExtension extends Minz_Extension
 
         $enableLogging = $config['enable_logging'];
 
-        if ($enableLogging) {
-            Minz_Log::warning('AutoFilter: entry_before_add HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
-        }
+//        if ($enableLogging) {
+//            Minz_Log::warning('AutoFilter: entry_before_add HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
+//        }
 
         if (!$entry) {
             return $entry;
@@ -156,9 +156,9 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         if (!$this->isChannelEnabled($entry)) {
-            if ($enableLogging) {
-                Minz_Log::warning('AutoFilter: Channel ' . $entry->feedId() . ' not in filter list, skipping');
-            }
+//            if ($enableLogging) {
+//                Minz_Log::warning('AutoFilter: Channel ' . $entry->feedId() . ' not in filter list, skipping');
+//            }
             return $entry;
         }
 
