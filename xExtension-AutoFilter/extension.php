@@ -29,9 +29,16 @@ class AutoFilterExtension extends Minz_Extension
         if (Minz_Request::isPost()) {
             $oldConfig = $this->getSystemConfiguration();
 
+            // Получаем и нормализуем настройки фильтрации каналов
             $channelsFilter = $_POST['auto_filter_channels_filter'] ?? [];
+            if (!is_array($channelsFilter)) {
+                $channelsFilter = [];
+            }
             $channelsFilter = array_map('strval', $channelsFilter);
+            // Удаляем дубликаты и пустые значения
+            $channelsFilter = array_values(array_unique(array_filter($channelsFilter)));
 
+            // Создаем новый конфиг
             $newConfig = [
                 'openrouter_api_key'          => Minz_Request::paramString('auto_filter_openrouter_api_key'),
                 'openrouter_model'            => Minz_Request::paramString('auto_filter_openrouter_model'),
@@ -42,8 +49,10 @@ class AutoFilterExtension extends Minz_Extension
                 'channels_filter'             => $channelsFilter,
             ];
 
+            // Сохраняем конфиг
             $this->setSystemConfiguration($newConfig);
 
+            // Очищаем кэш при изменении ключевых настроек
             if ($this->shouldInvalidateCache($oldConfig, $newConfig)) {
                 $this->invalidateControllerCache();
             }
@@ -58,10 +67,23 @@ class AutoFilterExtension extends Minz_Extension
     {
         foreach (['openrouter_api_key', 'openrouter_model', 'prompt'] as $key) {
             if (($oldConfig[$key] ?? null) !== ($newConfig[$key] ?? null)) {
-                Minz_Log::warning('AutoFilter: Configuration change detected for "' . $key . '", invalidating cache');
                 return true;
             }
         }
+
+        // Очищаем кэш при изменении списка фильтруемых каналов
+        if (isset($oldConfig['channels_filter'], $newConfig['channels_filter'])) {
+            $oldChannels = is_array($oldConfig['channels_filter']) ? $oldConfig['channels_filter'] : [];
+            $newChannels = is_array($newConfig['channels_filter']) ? $newConfig['channels_filter'] : [];
+
+            sort($oldChannels);
+            sort($newChannels);
+
+            if ($oldChannels !== $newChannels) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -105,10 +127,6 @@ class AutoFilterExtension extends Minz_Extension
 
         $enableLogging = $config['enable_logging'];
 
-//        if ($enableLogging) {
-//            Minz_Log::warning('AutoFilter: entry_before_add HOOK called for: ' . ($entry ? $entry->title() : 'NULL'));
-//        }
-
         if (!$entry) {
             return $entry;
         }
@@ -138,9 +156,6 @@ class AutoFilterExtension extends Minz_Extension
                                 FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
                                 FreshExtension_AutoFilter_Labels::POSSIBLE
                             ], true)) {
-                                if ($enableLogging) {
-                                    Minz_Log::info('AutoFilter: Entry already has ad-related label, skipping');
-                                }
                                 return $entry;
                             }
                             break;
@@ -156,9 +171,6 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         if (!$this->isChannelEnabled($entry)) {
-//            if ($enableLogging) {
-//                Minz_Log::warning('AutoFilter: Channel ' . $entry->feedId() . ' not in filter list, skipping');
-//            }
             return $entry;
         }
 
@@ -174,16 +186,8 @@ class AutoFilterExtension extends Minz_Extension
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
         $result     = $controller->analyzeEntryBeforeAdd($entry);
 
-        if ($enableLogging) {
-            if ($result['success']) {
-                Minz_Log::warning(sprintf(
-                    'AutoFilter: Done — Label=%s, Confidence=%.2f',
-                    $result['analysis']['label'],
-                    $result['analysis']['confidence']
-                ));
-            } else {
-                Minz_Log::warning('AutoFilter: Error — ' . ($result['error'] ?? 'unknown'));
-            }
+        if ($enableLogging && !$result['success']) {
+            Minz_Log::warning('AutoFilter: Error — ' . ($result['error'] ?? 'unknown'));
         }
 
         // Всегда возвращаем запись — удалять из ленты не нужно,
@@ -201,7 +205,9 @@ class AutoFilterExtension extends Minz_Extension
         if (empty($channelsFilter) || !is_array($channelsFilter)) {
             return true;
         }
-
-        return in_array((string)$entry->feedId(), $channelsFilter, true);
+        
+        // Проверяем, что feedId является строкой для корректного сравнения
+        $feedId = (string)$entry->feedId();
+        return in_array($feedId, $channelsFilter, true);
     }
 }

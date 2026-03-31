@@ -58,11 +58,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     {
         $model = trim($model);
         if (empty($model)) {
-            Minz_Log::warning('AutoFilter: Model is empty, using default');
             return 'openai/gpt-3.5-turbo';
-        }
-        if (!str_contains($model, '/')) {
-            Minz_Log::warning('AutoFilter: Invalid model format "' . $model . '", expected provider/model-name');
         }
         return $model;
     }
@@ -116,14 +112,28 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return $response;
         }
 
-        if ($this->enableLogging) {
-            Minz_Log::warning('AutoFilter: API response preview: ' . substr($response['content'], 0, 100));
+        // Проверяем валидность ответа перед парсингом
+        if (empty($response['content'])) {
+            $error = 'Empty response from AI service';
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: ' . $error);
+            }
+            return ['success' => false, 'error' => $error];
         }
 
         $analysis = $this->parseResponse($response['content']);
 
         if ($this->enableLogging) {
             $this->logAnalysisResult($entry, $analysis);
+        }
+
+        // Проверяем, что анализ прошел успешно
+        if (!isset($analysis['label'])) {
+            $error = 'Invalid analysis result';
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: ' . $error);
+            }
+            return ['success' => false, 'error' => $error];
         }
 
         $this->applyLabelsToEntry($entry, $analysis);
@@ -178,25 +188,18 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
                 $currentTagsId[] = (int)substr($tagString, 2);
             }
         }
-        
+
         if (!in_array($targetLabel->id(), $currentTagsId, true)) {
             $currentTagsId[] = $targetLabel->id();
             // Форматируем теги обратно в строку формата "t:id1;t:id2"
             $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
             $entry->_tags($newTagsString);
-
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: Label "' . $label . '" (ID=' . $targetLabel->id() . ') applied to entry');
-            }
         }
 
         // Подтверждённую рекламу помечаем прочитанной:
         // скрывается из непрочитанных, но доступна через фильтр label:Реклама
         if ($label === self::LABEL_ADVERTISEMENT) {
             $entry->_isRead(true);
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: Entry marked as read');
-            }
         }
     }
 
@@ -275,10 +278,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return $response;
         }
 
-        if ($this->enableLogging) {
-            Minz_Log::warning('AutoFilter: API response preview: ' . substr($response['content'], 0, 100));
-        }
-
         $analysis = $this->parseResponse($response['content']);
 
         if ($this->enableLogging) {
@@ -299,6 +298,12 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      */
     private function applyLabelsViaDao(FreshRSS_Entry $entry, array $analysis): void
     {
+        // Проверяем корректность анализа
+        if (!isset($analysis['label'])) {
+            Minz_Log::warning('AutoFilter: Invalid analysis result in applyLabelsViaDao');
+            return;
+        }
+
         $label = $analysis['label'] ?? self::LABEL_NONE;
 
         if ($label === self::LABEL_NONE) {
@@ -315,11 +320,16 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
-        foreach ($tagDao->listTags() as $l) {
-            if ($l->name() === $label) {
-                $targetLabel = $l;
-                break;
+        try {
+            foreach ($tagDao->listTags() as $l) {
+                if ($l->name() === $label) {
+                    $targetLabel = $l;
+                    break;
+                }
             }
+        } catch (Exception $e) {
+            Minz_Log::warning('AutoFilter: Failed to retrieve tags: ' . $e->getMessage());
+            return;
         }
 
         if ($targetLabel === null) {
@@ -331,10 +341,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         }
 
         // Добавляем метку к записи
-        $tagDao->tagEntry($targetLabel->id(), $entryId);
-
-        if ($this->enableLogging) {
-            Minz_Log::warning('AutoFilter: Label "' . $label . '" applied to entry ID=' . $entryId);
+        try {
+            $tagDao->tagEntry($targetLabel->id(), $entryId);
+        } catch (Exception $e) {
+            Minz_Log::warning('AutoFilter: Failed to add tag: ' . $e->getMessage());
+            return;
         }
 
         // Подтверждённую рекламу помечаем прочитанной
@@ -342,9 +353,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             try {
                 $entryDao = FreshRSS_Factory::createEntryDao();
                 $entryDao->markRead([$entryId], true);
-                if ($this->enableLogging) {
-                    Minz_Log::warning('AutoFilter: Entry ID=' . $entryId . ' marked as read');
-                }
             } catch (Throwable $e) {
                 Minz_Log::warning('AutoFilter: Failed to mark entry as read: ' . $e->getMessage());
             }
@@ -432,8 +440,14 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      */
     private function parseResponse(string $content): array
     {
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            Minz_Log::warning('AutoFilter: json_last_error before parsing: ' . json_last_error());
+        if (empty($content)) {
+            Minz_Log::warning('AutoFilter: Empty content in parseResponse');
+            return [
+                'is_advertisement' => false,
+                'confidence'       => 0.0,
+                'reason'           => 'Empty response from AI service',
+                'label'            => self::LABEL_NONE,
+            ];
         }
 
         $json = json_decode($content, true);
@@ -555,32 +569,34 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     private function logPromptMetadata(FreshRSS_Entry $entry, string $prompt): void
     {
         Minz_Log::warning(sprintf(
-            'AutoFilter: Processing title="%s", content_chars=%d',
-            substr($entry->title(), 0, 50),
-            strlen(strip_tags($entry->content()))
+            'AutoFilter: Processing title="%s"',
+            substr($entry->title(), 0, 50)
         ));
     }
 
     private function logAnalysisResult(FreshRSS_Entry $entry, array $analysis): void
     {
+        // Логируем только если есть подозрение или реклама
+        if ($analysis['label'] === FreshExtension_AutoFilter_Labels::NONE) {
+            return;
+        }
+
         $contentPreview = substr(strip_tags($entry->content()), 0, 100);
         if (strlen(strip_tags($entry->content())) > 100) {
             $contentPreview .= '...';
         }
-        
+
         Minz_Log::warning(sprintf(
-            'AutoFilter: ID=%d Label=%s Confidence=%.2f Reason=%s Content="%s"',
-            $entry->id(),
+            'AutoFilter: DETECTED Label=%s Confidence=%.2f Reason=%s Title="%s"',
             $analysis['label'],
             $analysis['confidence'],
             $analysis['reason'],
-            str_replace(["\n", "\r"], ' ', $contentPreview)
+            substr($entry->title(), 0, 50)
         ));
     }
 
     public function invalidateCache(): void
     {
         // Здесь можно реализовать логику очистки кэша, если она понадобится
-        Minz_Log::info('AutoFilter: Cache invalidated');
     }
 }
