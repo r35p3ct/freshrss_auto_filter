@@ -106,9 +106,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $response = $this->callOpenRouter($prompt);
 
         if (!$response['success']) {
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: API error: ' . ($response['error'] ?? 'unknown'));
-            }
             return $response;
         }
 
@@ -272,9 +269,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $response = $this->callOpenRouter($prompt);
 
         if (!$response['success']) {
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: API error: ' . ($response['error'] ?? 'unknown'));
-            }
             return $response;
         }
 
@@ -495,6 +489,40 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      */
     private function callOpenRouter(string $prompt): array
     {
+        $maxRetries = 2;
+        $attempt    = 0;
+
+        while (true) {
+            $attempt++;
+
+            $result = $this->callOpenRouterOnce($prompt);
+
+            // Если успех или это не rate limit — возвращаем результат
+            if ($result['success'] || ($result['http_code'] ?? 0) !== 429) {
+                return $result;
+            }
+
+            // Если это rate limit и есть попытки — ждём и пробуем снова
+            if ($attempt <= $maxRetries) {
+                $delay = random_int(1000, 3000); // 1-3 секунды
+                if ($this->enableLogging) {
+                    Minz_Log::warning('AutoFilter: Rate limit hit, retrying in ' . ($delay / 1000) . 's (attempt ' . $attempt . '/' . $maxRetries . ')');
+                }
+                usleep($delay * 1000);
+            } else {
+                // Все попытки исчерпаны
+                return $result;
+            }
+        }
+    }
+
+    /**
+     * Единичный вызов OpenRouter API без повторных попыток
+     *
+     * @return array{success: bool, content?: string, error?: string, http_code?: int}
+     */
+    private function callOpenRouterOnce(string $prompt): array
+    {
         $url     = 'https://openrouter.ai/api/v1/chat/completions';
         $headers = [
             'Authorization: Bearer ' . $this->apiKey,
@@ -521,19 +549,16 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         curl_close($ch);
 
         if ($error) {
-            Minz_Log::warning('AutoFilter: CURL error: ' . $error);
             return ['success' => false, 'error' => 'CURL error: ' . $error];
         }
 
         if ($httpCode !== 200) {
             $msg = $this->getHttpErrorMessage($httpCode, $response);
-            Minz_Log::warning('AutoFilter: HTTP ' . $httpCode . ' - ' . $msg);
             return ['success' => false, 'error' => $msg, 'http_code' => $httpCode];
         }
 
         $decoded = json_decode($response, true);
         if (!isset($decoded['choices'][0]['message']['content'])) {
-            Minz_Log::warning('AutoFilter: Invalid API response structure');
             return ['success' => false, 'error' => 'Invalid API response'];
         }
 

@@ -186,8 +186,10 @@ class AutoFilterExtension extends Minz_Extension
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
         $result     = $controller->analyzeEntryBeforeAdd($entry);
 
+        // Логируем только если ошибка и логирование включено
+        // Сам контроллер уже логирует детали, здесь только общий факт
         if ($enableLogging && !$result['success']) {
-            Minz_Log::warning('AutoFilter: Error — ' . ($result['error'] ?? 'unknown'));
+            Minz_Log::warning('AutoFilter: Analysis failed — ' . ($result['error'] ?? 'unknown error'));
         }
 
         // Всегда возвращаем запись — удалять из ленты не нужно,
