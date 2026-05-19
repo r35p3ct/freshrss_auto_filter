@@ -83,6 +83,44 @@ declare(strict_types=1);
     </div>
 
     <div class="form-group">
+        <label class="group-name" for="auto_filter_background_mode"><?php echo _t('ext.field.background_mode'); ?></label>
+        <div class="group-controls">
+            <input type="hidden" name="auto_filter_background_mode" value="0" />
+            <label>
+                <input type="checkbox" id="auto_filter_background_mode" name="auto_filter_background_mode"
+                       value="1"
+                       <?php echo $this->getSystemConfigurationValue('background_mode') ? 'checked' : ''; ?> />
+                <?php echo _t('ext.field.background_mode_hint'); ?>
+            </label>
+            <p class="help">
+                <?php echo _t('ext.field.background_mode_help'); ?>
+            </p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="auto_filter_batch_size"><?php echo _t('ext.field.batch_size'); ?></label>
+        <div class="group-controls">
+            <input type="number" id="auto_filter_batch_size"
+                   name="auto_filter_batch_size"
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('batch_size') ?? 5), ENT_QUOTES); ?>"
+                   min="1" max="100" />
+            <p class="help"><?php echo _t('ext.field.batch_size_hint'); ?></p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="auto_filter_request_delay_ms"><?php echo _t('ext.field.request_delay_ms'); ?></label>
+        <div class="group-controls">
+            <input type="number" id="auto_filter_request_delay_ms"
+                   name="auto_filter_request_delay_ms"
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('request_delay_ms') ?? 2000), ENT_QUOTES); ?>"
+                   min="0" max="60000" step="100" />
+            <p class="help"><?php echo _t('ext.field.request_delay_ms_hint'); ?></p>
+        </div>
+    </div>
+
+    <div class="form-group">
         <label class="group-name"><?php echo _t('ext.field.channels_filter'); ?></label>
         <div class="group-controls">
             <p class="help">

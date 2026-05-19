@@ -7,7 +7,7 @@ require_once __DIR__ . '/Controllers/openrouterController.php';
 /**
  * Расширение AutoFilter для автоматической фильтрации рекламы через AI.
  *
- * @version 0.3.0
+ * @version 0.4.0
  */
 class AutoFilterExtension extends Minz_Extension
 {
@@ -47,6 +47,9 @@ class AutoFilterExtension extends Minz_Extension
                 'prompt'                      => Minz_Request::paramString('auto_filter_prompt'),
                 'enable_logging'              => Minz_Request::paramString('auto_filter_enable_logging') === '1',
                 'channels_filter'             => $channelsFilter,
+                'background_mode'             => Minz_Request::paramString('auto_filter_background_mode') === '1',
+                'batch_size'                  => (int)Minz_Request::param('auto_filter_batch_size', 5),
+                'request_delay_ms'            => (int)Minz_Request::param('auto_filter_request_delay_ms', 2000),
             ];
 
             // Сохраняем конфиг
@@ -111,6 +114,8 @@ class AutoFilterExtension extends Minz_Extension
             'confidence_threshold_low' => $this->getSystemConfigurationValue('confidence_threshold_low'),
             'prompt' => $this->getSystemConfigurationValue('prompt'),
             'enable_logging' => $this->getSystemConfigurationValue('enable_logging'),
+            'batch_size' => $this->getSystemConfigurationValue('batch_size'),
+            'request_delay_ms' => $this->getSystemConfigurationValue('request_delay_ms'),
         ];
     }
 
@@ -123,19 +128,16 @@ class AutoFilterExtension extends Minz_Extension
      */
     public function onEntryBeforeAdd($entry): ?FreshRSS_Entry
     {
-        $config = $this->buildConfigArray();
-
-        $enableLogging = $config['enable_logging'];
-
         if (!$entry) {
             return $entry;
         }
 
+        $enableLogging = $this->getSystemConfigurationValue('enable_logging');
+        $backgroundMode = $this->getSystemConfigurationValue('background_mode');
+
         // Проверка: если уже есть метка "Реклама" или "Подозрение" в тегах записи, пропускаем
         $tags = $entry->tags(true);
-        // tags(true) должен возвращать массив, но на всякий случай проверяем
         if (!is_array($tags)) {
-            // Если вернулась строка, парсим её
             $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
         }
         foreach ($tags as $tag) {
@@ -145,8 +147,6 @@ class AutoFilterExtension extends Minz_Extension
                 if ($tagId <= 0) {
                     continue;
                 }
-                // Проверяем, является ли этот тег одной из наших меток
-                // Для этого получаем все метки и ищем по ID
                 $tagDao = FreshRSS_Factory::createTagDao();
                 try {
                     $allTags = $tagDao->listTags();
@@ -162,7 +162,6 @@ class AutoFilterExtension extends Minz_Extension
                         }
                     }
                 } catch (Exception $e) {
-                    // Если не удалось получить метки, продолжаем анализ
                     if ($enableLogging) {
                         Minz_Log::warning('AutoFilter: Failed to check existing label: ' . $e->getMessage());
                     }
@@ -174,8 +173,14 @@ class AutoFilterExtension extends Minz_Extension
             return $entry;
         }
 
-        $apiKey = $config['openrouter_api_key'];
+        // Фоновый режим: ставим метку "Непроверено" и пропускаем синхронную проверку
+        if ($backgroundMode) {
+            $this->applyPendingLabel($entry);
+            return $entry;
+        }
 
+        // Синхронный режим: проверяем сразу через AI
+        $apiKey = $this->getSystemConfigurationValue('openrouter_api_key');
         if (empty($apiKey)) {
             if ($enableLogging) {
                 Minz_Log::warning('AutoFilter: API key not configured, skipping');
@@ -183,18 +188,56 @@ class AutoFilterExtension extends Minz_Extension
             return $entry;
         }
 
-        $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
-        $result     = $controller->analyzeEntryBeforeAdd($entry);
+        $controller = new FreshExtension_AutoFilter_openrouter_Controller($this->buildConfigArray());
+        $result = $controller->analyzeEntryBeforeAdd($entry);
 
-        // Логируем только если ошибка и логирование включено
-        // Сам контроллер уже логирует детали, здесь только общий факт
         if ($enableLogging && !$result['success']) {
             Minz_Log::warning('AutoFilter: Analysis failed — ' . ($result['error'] ?? 'unknown error'));
         }
 
-        // Всегда возвращаем запись — удалять из ленты не нужно,
-        // реклама помечается прочитанной и скрыта через метку.
         return $entry;
+    }
+
+    /**
+     * Добавляет метку "Непроверено" к записи (до вставки в БД).
+     */
+    private function applyPendingLabel(FreshRSS_Entry $entry): void
+    {
+        $tagDao = FreshRSS_Factory::createTagDao();
+        $pendingLabel = null;
+
+        try {
+            foreach ($tagDao->listTags() as $t) {
+                if ($t->name() === FreshExtension_AutoFilter_Labels::PENDING) {
+                    $pendingLabel = $t;
+                    break;
+                }
+            }
+        } catch (Exception $e) {
+            return;
+        }
+
+        if ($pendingLabel === null) {
+            return;
+        }
+
+        $currentTagsId = [];
+        $tags = $entry->tags(true);
+        if (!is_array($tags)) {
+            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
+        }
+        foreach ($tags as $tag) {
+            $tagString = (string)$tag;
+            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
+                $currentTagsId[] = (int)substr($tagString, 2);
+            }
+        }
+
+        if (!in_array($pendingLabel->id(), $currentTagsId, true)) {
+            $currentTagsId[] = $pendingLabel->id();
+            $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
+            $entry->_tags($newTagsString);
+        }
     }
 
     /**
@@ -207,8 +250,7 @@ class AutoFilterExtension extends Minz_Extension
         if (empty($channelsFilter) || !is_array($channelsFilter)) {
             return true;
         }
-        
-        // Проверяем, что feedId является строкой для корректного сравнения
+
         $feedId = (string)$entry->feedId();
         return in_array($feedId, $channelsFilter, true);
     }

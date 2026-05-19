@@ -10,4 +10,6 @@ final class FreshExtension_AutoFilter_Labels
     public const NONE            = 'none';
     public const ADVERTISEMENT   = 'Реклама';
     public const POSSIBLE        = 'Подозрение';
+    public const PENDING         = 'Непроверено';
+    public const CHECKED         = 'Проверено';
 }

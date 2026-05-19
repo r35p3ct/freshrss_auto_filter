@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../Labels.php';
+require_once __DIR__ . '/../Models/PendingEntriesModel.php';
 
 /**
  * Контроллер для анализа записей через OpenRouter API.
@@ -19,6 +20,8 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     private const LABEL_NONE            = FreshExtension_AutoFilter_Labels::NONE;
     private const LABEL_ADVERTISEMENT   = FreshExtension_AutoFilter_Labels::ADVERTISEMENT;
     private const LABEL_POSSIBLE        = FreshExtension_AutoFilter_Labels::POSSIBLE;
+    private const LABEL_PENDING         = FreshExtension_AutoFilter_Labels::PENDING;
+    private const LABEL_CHECKED         = FreshExtension_AutoFilter_Labels::CHECKED;
 
     private string $apiKey;
     private string $model;
@@ -109,7 +112,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return $response;
         }
 
-        // Проверяем валидность ответа перед парсингом
         if (empty($response['content'])) {
             $error = 'Empty response from AI service';
             if ($this->enableLogging) {
@@ -124,7 +126,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             $this->logAnalysisResult($entry, $analysis);
         }
 
-        // Проверяем, что анализ прошел успешно
         if (!isset($analysis['label'])) {
             $error = 'Invalid analysis result';
             if ($this->enableLogging) {
@@ -153,7 +154,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        // Находим ID метки по имени (используем TagDao, т.к. в FreshRSS метки = tags)
         $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
@@ -172,8 +172,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        // Получаем текущие теги записи и добавляем новый
-        // Парсим теги вручную из формата t:id
         $currentTagsId = [];
         $tags = $entry->tags(true);
         if (!is_array($tags)) {
@@ -188,13 +186,10 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
         if (!in_array($targetLabel->id(), $currentTagsId, true)) {
             $currentTagsId[] = $targetLabel->id();
-            // Форматируем теги обратно в строку формата "t:id1;t:id2"
             $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
             $entry->_tags($newTagsString);
         }
 
-        // Подтверждённую рекламу помечаем прочитанной:
-        // скрывается из непрочитанных, но доступна через фильтр label:Реклама
         if ($label === self::LABEL_ADVERTISEMENT) {
             $entry->_isRead(true);
         }
@@ -221,7 +216,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return ['success' => false, 'error' => 'Entry not found'];
         }
 
-        // Для уже существующей записи используем applyLabelsViaDao
         return $this->analyzeExistingEntry($entry);
     }
 
@@ -292,25 +286,18 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      */
     private function applyLabelsViaDao(FreshRSS_Entry $entry, array $analysis): void
     {
-        // Проверяем корректность анализа
         if (!isset($analysis['label'])) {
             Minz_Log::warning('AutoFilter: Invalid analysis result in applyLabelsViaDao');
             return;
         }
 
         $label = $analysis['label'] ?? self::LABEL_NONE;
-
-        if ($label === self::LABEL_NONE) {
-            return;
-        }
-
         $entryId = $entry->id();
         if (empty($entryId)) {
             Minz_Log::warning('AutoFilter: Cannot apply label - entry has no ID');
             return;
         }
 
-        // Находим ID метки по имени (используем TagDao)
         $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
@@ -326,7 +313,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        if ($targetLabel === null) {
+        if ($targetLabel === null && $label !== self::LABEL_NONE) {
             Minz_Log::warning(
                 'AutoFilter: Label "' . $label . '" not found. '
                 . 'Create it manually: Settings -> Labels.'
@@ -334,15 +321,15 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return;
         }
 
-        // Добавляем метку к записи
-        try {
-            $tagDao->tagEntry($targetLabel->id(), $entryId);
-        } catch (Exception $e) {
-            Minz_Log::warning('AutoFilter: Failed to add tag: ' . $e->getMessage());
-            return;
+        if ($targetLabel !== null) {
+            try {
+                $tagDao->tagEntry($targetLabel->id(), $entryId);
+            } catch (Exception $e) {
+                Minz_Log::warning('AutoFilter: Failed to add tag: ' . $e->getMessage());
+                return;
+            }
         }
 
-        // Подтверждённую рекламу помечаем прочитанной
         if ($label === self::LABEL_ADVERTISEMENT) {
             try {
                 $entryDao = FreshRSS_Factory::createEntryDao();
@@ -351,6 +338,111 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
                 Minz_Log::warning('AutoFilter: Failed to mark entry as read: ' . $e->getMessage());
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Фоновая обработка записей с меткой "Непроверено"
+    // -------------------------------------------------------------------------
+
+    /**
+     * Находит записи с меткой "Непроверено", проверяет их через AI,
+     * применяет результат и удаляет метку "Непроверено".
+     *
+     * @param int $limit Максимальное количество записей за один запуск
+     * @param int $delayMs Задержка между запросами в мс
+     * @param array<int, string> $channelsFilter Список ID каналов для фильтрации (пустой = все)
+     * @return array{processed: int, errors: int, details: array}
+     */
+    public function processPendingEntries(int $limit, int $delayMs, array $channelsFilter = []): array
+    {
+        $result = [
+            'processed' => 0,
+            'errors'    => 0,
+            'details'   => [],
+        ];
+
+        if (empty($this->apiKey)) {
+            Minz_Log::warning('AutoFilter: API key not configured, skipping background processing');
+            return $result;
+        }
+
+        $tagDao = FreshRSS_Factory::createTagDao();
+        $pendingTag = null;
+
+        try {
+            foreach ($tagDao->listTags() as $t) {
+                if ($t->name() === self::LABEL_PENDING) {
+                    $pendingTag = $t;
+                    break;
+                }
+            }
+        } catch (Exception $e) {
+            Minz_Log::warning('AutoFilter: Failed to retrieve pending tag: ' . $e->getMessage());
+            return $result;
+        }
+
+        if ($pendingTag === null) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Pending label not found');
+            }
+            return $result;
+        }
+
+        $model = new FreshExtension_AutoFilter_PendingEntries_Model();
+        $entryIds = $model->getPendingEntryIds((int)$pendingTag->id(), $limit, $channelsFilter);
+
+        if (empty($entryIds)) {
+            return $result;
+        }
+
+        $entryDao = FreshRSS_Factory::createEntryDao();
+
+        foreach ($entryIds as $entryId) {
+            $entry = $entryDao->searchById($entryId);
+            if (!$entry) {
+                $result['errors']++;
+                $result['details'][] = ['entry_id' => $entryId, 'error' => 'Entry not found'];
+                continue;
+            }
+
+            $analysisResult = $this->analyzeExistingEntry($entry);
+
+            if (!$analysisResult['success']) {
+                $result['errors']++;
+                $result['details'][] = [
+                    'entry_id' => $entryId,
+                    'error'    => $analysisResult['error'] ?? 'unknown error',
+                ];
+                // Не удаляем метку "Непроверено" при ошибке, чтобы повторить позже
+                if ($delayMs > 0) {
+                    usleep($delayMs * 1000);
+                }
+                continue;
+            }
+
+            // Удаляем метку "Непроверено"
+            $model->removeTagFromEntry((int)$pendingTag->id(), $entryId);
+
+            $result['processed']++;
+            $result['details'][] = [
+                'entry_id' => $entryId,
+                'label'    => $analysisResult['analysis']['label'] ?? self::LABEL_NONE,
+            ];
+
+            if ($delayMs > 0) {
+                usleep($delayMs * 1000);
+            }
+        }
+
+        if ($this->enableLogging) {
+            Minz_Log::warning(sprintf(
+                'AutoFilter: Background processing done — processed=%d, errors=%d',
+                $result['processed'],
+                $result['errors']
+            ));
+        }
+
+        return $result;
     }
 
     // -------------------------------------------------------------------------
@@ -497,20 +589,17 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
             $result = $this->callOpenRouterOnce($prompt);
 
-            // Если успех или это не rate limit — возвращаем результат
             if ($result['success'] || ($result['http_code'] ?? 0) !== 429) {
                 return $result;
             }
 
-            // Если это rate limit и есть попытки — ждём и пробуем снова
             if ($attempt <= $maxRetries) {
-                $delay = random_int(1000, 3000); // 1-3 секунды
+                $delay = random_int(1000, 3000);
                 if ($this->enableLogging) {
                     Minz_Log::warning('AutoFilter: Rate limit hit, retrying in ' . ($delay / 1000) . 's (attempt ' . $attempt . '/' . $maxRetries . ')');
                 }
                 usleep($delay * 1000);
             } else {
-                // Все попытки исчерпаны
                 return $result;
             }
         }
@@ -601,7 +690,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
     private function logAnalysisResult(FreshRSS_Entry $entry, array $analysis): void
     {
-        // Логируем только если есть подозрение или реклама
         if ($analysis['label'] === FreshExtension_AutoFilter_Labels::NONE) {
             return;
         }

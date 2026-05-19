@@ -2,7 +2,7 @@
     "name": "AutoFilter",
     "author": "Dt",
     "description": "Автоматическое определение и фильтрация рекламных записей с помощью AI (OpenRouter API)",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "entrypoint": "AutoFilter",
     "type": "user",
     "system_configuration": [
@@ -12,9 +12,19 @@
         "confidence_threshold_low",
         "prompt",
         "enable_logging",
-        "channels_filter"
+        "channels_filter",
+        "background_mode",
+        "batch_size",
+        "request_delay_ms"
     ],
     "changelog": {
+        "0.4.0": [
+            "Добавлен фоновый режим проверки записей (background_mode)",
+            "Новые метки: 'Непроверено' и 'Проверено' для отслеживания состояния",
+            "CLI-скрипт scripts/process_pending.php для фоновой обработки",
+            "Настройки batch_size и request_delay_ms для контроля нагрузки на AI API",
+            "Устранены задержки при чтении через API-клиенты (CapyReader и др.)"
+        ],
         "0.3.1": [
             "Исправлено: переход на хук entry_before_add вместо несуществующего entry_after_insert",
             "Исправлено: использование TagDao вместо LabelDao для работы с метками",

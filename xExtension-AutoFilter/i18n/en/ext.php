@@ -23,5 +23,12 @@ return [
         'channels_filter' => 'Channels for filtering',
         'channels_filter_hint' => 'Select channels for automatic advertisement filtering. If nothing is selected, all channels are checked.',
         'select_all_channels' => 'Select all channels',
+        'background_mode' => 'Background checking mode',
+        'background_mode_hint' => 'Check entries via a background script instead of on add',
+        'background_mode_help' => 'During feed updates, new entries are tagged as "Pending" and added instantly. AI verification runs via a background script on a schedule. This eliminates delays when reading via API (CapyReader, etc.).',
+        'batch_size' => 'Batch size',
+        'batch_size_hint' => 'How many entries to check per background script run (1–100).',
+        'request_delay_ms' => 'Request delay',
+        'request_delay_ms_hint' => 'Pause in milliseconds between AI requests (0–60000). Helps avoid rate limits.',
     ],
 ];
