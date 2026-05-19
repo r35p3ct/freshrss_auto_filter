@@ -3,11 +3,11 @@
 /**
  * Фоновый скрипт для проверки записей с меткой "Непроверено" через AI.
  *
- * Рекомендуется добавить в cron:
- *   */5 * * * * php /path/to/freshrss/extensions/xExtension-AutoFilter/scripts/process_pending.php
+ * Рекомендуется добавить в cron (каждые 5 минут):
+ *   php /path/to/freshrss/extensions/xExtension-AutoFilter/scripts/process_pending.php
  *
- * Или для Docker:
- *   */5 * * * * docker exec freshrss php /var/www/FreshRSS/extensions/xExtension-AutoFilter/scripts/process_pending.php
+ * Пример cron-записи:
+ *   /5 * * * * docker exec freshrss php /var/www/FreshRSS/extensions/xExtension-AutoFilter/scripts/process_pending.php
  */
 
 declare(strict_types=1);
