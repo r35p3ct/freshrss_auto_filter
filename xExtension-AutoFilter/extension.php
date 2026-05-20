@@ -135,6 +135,14 @@ class AutoFilterExtension extends Minz_Extension
         $enableLogging = $this->getSystemConfigurationValue('enable_logging');
         $backgroundMode = $this->getSystemConfigurationValue('background_mode');
 
+        if ($enableLogging) {
+            Minz_Log::warning(sprintf(
+                'AutoFilter: Hook entry_before_add fired — title="%s" feed=%s',
+                substr($entry->title(), 0, 50),
+                $entry->feedId()
+            ));
+        }
+
         // Проверка: если уже есть метка "Реклама" или "Подозрение" в тегах записи, пропускаем
         $tags = $entry->tags(true);
         if (!is_array($tags)) {
@@ -156,6 +164,9 @@ class AutoFilterExtension extends Minz_Extension
                                 FreshExtension_AutoFilter_Labels::ADVERTISEMENT,
                                 FreshExtension_AutoFilter_Labels::POSSIBLE
                             ], true)) {
+                                if ($enableLogging) {
+                                    Minz_Log::warning('AutoFilter: Entry already labeled, skip');
+                                }
                                 return $entry;
                             }
                             break;
@@ -170,6 +181,12 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         if (!$this->isChannelEnabled($entry)) {
+            if ($enableLogging) {
+                Minz_Log::warning(sprintf(
+                    'AutoFilter: Entry skipped — feed %s not in channels_filter',
+                    $entry->feedId()
+                ));
+            }
             return $entry;
         }
 
@@ -248,6 +265,17 @@ class AutoFilterExtension extends Minz_Extension
             $currentTagsId[] = $pendingLabel->id();
             $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
             $entry->_tags($newTagsString);
+            Minz_Log::warning(sprintf(
+                'AutoFilter: Applied pending label (id=%d) to entry "%s"',
+                $pendingLabel->id(),
+                substr($entry->title(), 0, 50)
+            ));
+        } else {
+            Minz_Log::warning(sprintf(
+                'AutoFilter: Entry "%s" already has pending label (id=%d)',
+                substr($entry->title(), 0, 50),
+                $pendingLabel->id()
+            ));
         }
     }
 

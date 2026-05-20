@@ -125,6 +125,16 @@ foreach ($users as $user) {
     $extList = FreshRSS_Context::userConf()->extensions_enabled ?? [];
     Minz_ExtensionManager::enableByList($extList, 'user');
 
+    // Проверяем, включено ли расширение у данного пользователя
+    $isEnabled = false;
+    if (is_array($extList)) {
+        $isEnabled = isset($extList[$extensionName]) || in_array($extensionName, $extList, true);
+    }
+    if (!$isEnabled) {
+        notice("AutoFilter: Extension not enabled for user {$user}, skipping.");
+        continue;
+    }
+
     // Находим активное расширение в менеджере
     $extension = Minz_ExtensionManager::findExtension($extensionName);
     if ($extension === null) {
