@@ -96,23 +96,6 @@ function notice(string $message): void {
 }
 
 // ---------------------------------------------------------------------------
-// Загружаем расширение и конфиг
-// ---------------------------------------------------------------------------
-
-$systemConf = FreshRSS_Context::systemConf();
-$extensionConf = $systemConf->ext[$extensionName] ?? [];
-
-$backgroundMode = !empty($extensionConf['background_mode']);
-$batchSize = (int)($extensionConf['batch_size'] ?? 5);
-$requestDelayMs = (int)($extensionConf['request_delay_ms'] ?? 2000);
-$channelsFilter = $extensionConf['channels_filter'] ?? [];
-
-if (!$backgroundMode) {
-    notice('AutoFilter: Background mode is disabled. Exiting.');
-    exit(0);
-}
-
-// ---------------------------------------------------------------------------
 // Обрабатываем каждого пользователя
 // ---------------------------------------------------------------------------
 
@@ -150,6 +133,16 @@ foreach ($users as $user) {
     }
 
     // Получаем актуальный конфиг из расширения
+    $backgroundMode = (bool)$extension->getSystemConfigurationValue('background_mode');
+    if (!$backgroundMode) {
+        notice("AutoFilter: Background mode is disabled for user {$user}. Skipping.");
+        continue;
+    }
+
+    $batchSize = (int)($extension->getSystemConfigurationValue('batch_size') ?? 5);
+    $requestDelayMs = (int)($extension->getSystemConfigurationValue('request_delay_ms') ?? 2000);
+    $channelsFilter = $extension->getSystemConfigurationValue('channels_filter') ?? [];
+
     $config = [
         'openrouter_api_key'        => $extension->getSystemConfigurationValue('openrouter_api_key'),
         'openrouter_model'          => $extension->getSystemConfigurationValue('openrouter_model'),
