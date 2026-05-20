@@ -23,6 +23,7 @@ if (php_sapi_name() !== 'cli') {
 
 $freshrssRoot = null;
 $possiblePaths = [
+    __DIR__ . '/../../../',
     __DIR__ . '/../../../../',
     __DIR__ . '/../../../../../',
 ];
