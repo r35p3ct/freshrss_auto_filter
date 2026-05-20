@@ -21,10 +21,10 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
             SELECT et.id_entry
             FROM `_entrytag` et
             INNER JOIN `_entry` e ON et.id_entry = e.id
-            WHERE et.id_tag = :id_tag
+            WHERE et.id_tag = ?
         SQL;
 
-        $params = [':id_tag' => $pendingTagId];
+        $params = [$pendingTagId];
 
         if (!empty($channelsFilter)) {
             $placeholders = implode(',', array_fill(0, count($channelsFilter), '?'));
@@ -45,7 +45,7 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
             return [];
         }
 
-        if (!$stm->execute(array_values($params))) {
+        if (!$stm->execute($params)) {
             return [];
         }
 
