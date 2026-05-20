@@ -157,11 +157,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $tagDao      = FreshRSS_Factory::createTagDao();
         $targetLabel = null;
 
-        foreach ($tagDao->listTags() as $l) {
-            if ($l->name() === $label) {
-                $targetLabel = $l;
-                break;
-            }
+        try {
+            $targetLabel = $tagDao->searchByName($label);
+        } catch (Exception $e) {
+            Minz_Log::warning('AutoFilter: Failed to search label "' . $label . '": ' . $e->getMessage());
+            return;
         }
 
         if ($targetLabel === null) {
@@ -302,14 +302,9 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $targetLabel = null;
 
         try {
-            foreach ($tagDao->listTags() as $l) {
-                if ($l->name() === $label) {
-                    $targetLabel = $l;
-                    break;
-                }
-            }
+            $targetLabel = $tagDao->searchByName($label);
         } catch (Exception $e) {
-            Minz_Log::warning('AutoFilter: Failed to retrieve tags: ' . $e->getMessage());
+            Minz_Log::warning('AutoFilter: Failed to search label "' . $label . '": ' . $e->getMessage());
             return;
         }
 
@@ -370,26 +365,43 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $pendingTag = null;
 
         try {
-            foreach ($tagDao->listTags() as $t) {
-                if ($t->name() === self::LABEL_PENDING) {
-                    $pendingTag = $t;
-                    break;
-                }
-            }
+            $pendingTag = $tagDao->searchByName(self::LABEL_PENDING);
         } catch (Exception $e) {
-            Minz_Log::warning('AutoFilter: Failed to retrieve pending tag: ' . $e->getMessage());
+            Minz_Log::warning('AutoFilter: Failed to search pending tag: ' . $e->getMessage());
             return $result;
         }
 
         if ($pendingTag === null) {
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: Pending label not found');
+            try {
+                $tagId = $tagDao->addTag(['name' => self::LABEL_PENDING]);
+                if ($tagId === false) {
+                    Minz_Log::warning('AutoFilter: Pending label not found and could not be created');
+                    return $result;
+                }
+                $pendingTag = $tagDao->searchByName(self::LABEL_PENDING);
+            } catch (Exception $e) {
+                Minz_Log::warning('AutoFilter: Failed to create pending tag: ' . $e->getMessage());
+                return $result;
             }
+        }
+
+        if ($pendingTag === null) {
+            Minz_Log::warning('AutoFilter: Pending label not found');
             return $result;
         }
 
         $model = new FreshExtension_AutoFilter_PendingEntries_Model();
         $entryIds = $model->getPendingEntryIds((int)$pendingTag->id(), $limit, $channelsFilter);
+
+        if ($this->enableLogging) {
+            Minz_Log::warning(sprintf(
+                'AutoFilter: Found %d pending entries (tag_id=%d, limit=%d, channels=%s)',
+                count($entryIds),
+                $pendingTag->id(),
+                $limit,
+                empty($channelsFilter) ? 'all' : implode(',', $channelsFilter)
+            ));
+        }
 
         if (empty($entryIds)) {
             return $result;

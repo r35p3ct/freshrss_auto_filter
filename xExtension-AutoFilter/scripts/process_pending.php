@@ -152,6 +152,15 @@ foreach ($users as $user) {
         'enable_logging'            => $extension->getSystemConfigurationValue('enable_logging'),
     ];
 
+    notice(sprintf(
+        'AutoFilter: User %s config — batch=%d, delay=%dms, background=%s, channels=%s',
+        $user,
+        $batchSize,
+        $requestDelayMs,
+        $backgroundMode ? 'on' : 'off',
+        empty($channelsFilter) ? 'all' : implode(',', $channelsFilter)
+    ));
+
     $controller = new FreshExtension_AutoFilter_openrouter_Controller($config);
     $result = $controller->processPendingEntries($batchSize, $requestDelayMs, $channelsFilter);
 

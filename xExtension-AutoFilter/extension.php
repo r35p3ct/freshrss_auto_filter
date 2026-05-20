@@ -200,6 +200,7 @@ class AutoFilterExtension extends Minz_Extension
 
     /**
      * Добавляет метку "Непроверено" к записи (до вставки в БД).
+     * Создаёт метку автоматически, если она отсутствует.
      */
     private function applyPendingLabel(FreshRSS_Entry $entry): void
     {
@@ -207,14 +208,24 @@ class AutoFilterExtension extends Minz_Extension
         $pendingLabel = null;
 
         try {
-            foreach ($tagDao->listTags() as $t) {
-                if ($t->name() === FreshExtension_AutoFilter_Labels::PENDING) {
-                    $pendingLabel = $t;
-                    break;
-                }
-            }
+            $pendingLabel = $tagDao->searchByName(FreshExtension_AutoFilter_Labels::PENDING);
         } catch (Exception $e) {
+            Minz_Log::warning('AutoFilter: Failed to search pending tag: ' . $e->getMessage());
             return;
+        }
+
+        if ($pendingLabel === null) {
+            try {
+                $tagId = $tagDao->addTag(['name' => FreshExtension_AutoFilter_Labels::PENDING]);
+                if ($tagId === false) {
+                    Minz_Log::warning('AutoFilter: Failed to create pending tag');
+                    return;
+                }
+                $pendingLabel = $tagDao->searchByName(FreshExtension_AutoFilter_Labels::PENDING);
+            } catch (Exception $e) {
+                Minz_Log::warning('AutoFilter: Failed to create pending tag: ' . $e->getMessage());
+                return;
+            }
         }
 
         if ($pendingLabel === null) {
