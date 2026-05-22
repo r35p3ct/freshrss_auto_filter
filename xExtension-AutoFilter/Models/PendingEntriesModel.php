@@ -25,7 +25,7 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
      */
     public function getPendingEntryIds(int $pendingTagId, int $limit, array $channelsFilter = []): array
     {
-        $tagPattern = 't:' . $pendingTagId;
+        $tagPattern = '#t:' . $pendingTagId;
 
         $sql = <<<'SQL'
             SELECT id
@@ -40,9 +40,9 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
 
         $params = [
             $tagPattern,
-            $tagPattern . ';%',
-            '%;' . $tagPattern . ';%',
-            '%;' . $tagPattern,
+            $tagPattern . ' %',
+            '% ' . $tagPattern . ' %',
+            '% ' . $tagPattern,
         ];
 
         if (!empty($channelsFilter)) {
@@ -101,15 +101,15 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
             return true;
         }
 
-        $tagPattern = 't:' . $tagId;
-        $parts = explode(';', $currentTags);
+        $tagPattern = '#t:' . $tagId;
+        $parts = explode(' ', $currentTags);
         $newParts = [];
         foreach ($parts as $part) {
             if ($part !== '' && $part !== $tagPattern) {
                 $newParts[] = $part;
             }
         }
-        $newTags = implode(';', $newParts);
+        $newTags = implode(' ', $newParts);
 
         if ($newTags === $currentTags) {
             return true;
@@ -144,16 +144,16 @@ class FreshExtension_AutoFilter_PendingEntries_Model extends Minz_ModelPdo
             return false;
         }
 
-        $tagPattern = 't:' . $tagId;
+        $tagPattern = '#t:' . $tagId;
         if ($currentTags === '') {
             $newTags = $tagPattern;
         } else {
-            $parts = explode(';', $currentTags);
+            $parts = explode(' ', $currentTags);
             if (in_array($tagPattern, $parts, true)) {
                 return true;
             }
             $parts[] = $tagPattern;
-            $newTags = implode(';', $parts);
+            $newTags = implode(' ', $parts);
         }
 
         $updateSql = 'UPDATE `_entry` SET tags = :tags WHERE id = :id';

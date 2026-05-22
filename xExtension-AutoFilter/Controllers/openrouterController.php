@@ -173,21 +173,15 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         }
 
         $currentTagsId = [];
-        $tags = $entry->tags(true);
-        if (!is_array($tags)) {
-            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
-        }
-        foreach ($tags as $tag) {
-            $tagString = (string)$tag;
-            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
-                $currentTagsId[] = (int)substr($tagString, 2);
+        foreach ($entry->tags() as $tag) {
+            if (is_string($tag) && str_starts_with($tag, 't:')) {
+                $currentTagsId[] = (int)substr($tag, 2);
             }
         }
 
         if (!in_array($targetLabel->id(), $currentTagsId, true)) {
             $currentTagsId[] = $targetLabel->id();
-            $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
-            $entry->_tags($newTagsString);
+            $entry->_tags(array_map(fn(int $id): string => 't:' . $id, $currentTagsId));
         }
 
         if ($label === self::LABEL_ADVERTISEMENT) {

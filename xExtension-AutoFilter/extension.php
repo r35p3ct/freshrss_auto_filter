@@ -144,14 +144,9 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         // Проверка: если уже есть метка "Реклама" или "Подозрение" в тегах записи, пропускаем
-        $tags = $entry->tags(true);
-        if (!is_array($tags)) {
-            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
-        }
-        foreach ($tags as $tag) {
-            $tagString = (string)$tag;
-            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
-                $tagId = (int)substr($tagString, 2);
+        foreach ($entry->tags() as $tag) {
+            if (is_string($tag) && str_starts_with($tag, 't:')) {
+                $tagId = (int)substr($tag, 2);
                 if ($tagId <= 0) {
                     continue;
                 }
@@ -250,21 +245,15 @@ class AutoFilterExtension extends Minz_Extension
         }
 
         $currentTagsId = [];
-        $tags = $entry->tags(true);
-        if (!is_array($tags)) {
-            $tags = is_string($tags) && $tags !== '' ? explode(';', $tags) : [];
-        }
-        foreach ($tags as $tag) {
-            $tagString = (string)$tag;
-            if ($tagString !== '' && str_starts_with($tagString, 't:')) {
-                $currentTagsId[] = (int)substr($tagString, 2);
+        foreach ($entry->tags() as $tag) {
+            if (is_string($tag) && str_starts_with($tag, 't:')) {
+                $currentTagsId[] = (int)substr($tag, 2);
             }
         }
 
         if (!in_array($pendingLabel->id(), $currentTagsId, true)) {
             $currentTagsId[] = $pendingLabel->id();
-            $newTagsString = implode(';', array_map(fn($id) => 't:' . $id, $currentTagsId));
-            $entry->_tags($newTagsString);
+            $entry->_tags(array_map(fn(int $id): string => 't:' . $id, $currentTagsId));
             Minz_Log::warning(sprintf(
                 'AutoFilter: Applied pending label (id=%d) to entry "%s"',
                 $pendingLabel->id(),
