@@ -323,6 +323,10 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
                 Minz_Log::warning('AutoFilter: Failed to add tag: ' . $e->getMessage());
                 return;
             }
+
+            // Синхронизируем поле tags в _entry
+            $pendingModel = new FreshExtension_AutoFilter_PendingEntries_Model();
+            $pendingModel->addTagToEntry($targetLabel->id(), $entryId);
         }
 
         if ($label === self::LABEL_ADVERTISEMENT) {
