@@ -647,7 +647,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             'messages' => [['role' => 'user', 'content' => $prompt]],
         ];
 
-        $payload = json_encode($data, JSON_UNESCAPED_UNICODE);
+        $payload = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($payload === false) {
             $jsonError = json_last_error_msg();
             if ($this->enableLogging) {
