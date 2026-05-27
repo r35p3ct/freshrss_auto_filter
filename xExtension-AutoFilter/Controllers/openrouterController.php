@@ -418,11 +418,19 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             $analysisResult = $this->analyzeExistingEntry($entry);
 
             if (!$analysisResult['success']) {
+                $errorMsg = $analysisResult['error'] ?? 'unknown error';
                 $result['errors']++;
                 $result['details'][] = [
                     'entry_id' => $entryId,
-                    'error'    => $analysisResult['error'] ?? 'unknown error',
+                    'error'    => $errorMsg,
                 ];
+                if ($this->enableLogging) {
+                    Minz_Log::warning(sprintf(
+                        'AutoFilter: Failed entry_id=%s error="%s"',
+                        $entryId,
+                        $errorMsg
+                    ));
+                }
                 // Не удаляем метку "Непроверено" при ошибке, чтобы повторить позже
                 if ($delayMs > 0) {
                     usleep($delayMs * 1000);
@@ -463,7 +471,8 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     {
         $title   = $entry->title();
         $content = $this->truncateContent(strip_tags($entry->content()));
-        $author  = reset($entry->authors()) ?: '';
+        $authors = $entry->authors();
+        $author  = reset($authors) ?: '';
         $url     = $entry->link();
 
         if (!empty($this->prompt)) {
@@ -546,10 +555,14 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             ];
         }
 
-        $json = json_decode($content, true);
+        // Убираем markdown-обёртку, если модель вернула ```json ... ```
+        $cleaned = preg_replace('/^\s*```(?:json)?\s*|\s*```\s*$/i', '', $content);
+        $cleaned = trim($cleaned);
+
+        $json = json_decode($cleaned, true);
 
         if (!is_array($json) || !isset($json['is_advertisement'], $json['confidence'])) {
-            Minz_Log::warning('AutoFilter: Failed to parse JSON: ' . substr($content, 0, 100));
+            Minz_Log::warning('AutoFilter: Failed to parse JSON: ' . substr($cleaned, 0, 200));
             return [
                 'is_advertisement' => false,
                 'confidence'       => 0.0,
@@ -648,16 +661,25 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         curl_close($ch);
 
         if ($error) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: CURL error: ' . $error);
+            }
             return ['success' => false, 'error' => 'CURL error: ' . $error];
         }
 
         if ($httpCode !== 200) {
             $msg = $this->getHttpErrorMessage($httpCode, $response);
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: HTTP ' . $httpCode . ' — ' . $msg);
+            }
             return ['success' => false, 'error' => $msg, 'http_code' => $httpCode];
         }
 
         $decoded = json_decode($response, true);
         if (!isset($decoded['choices'][0]['message']['content'])) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Invalid API response structure: ' . substr($response, 0, 200));
+            }
             return ['success' => false, 'error' => 'Invalid API response'];
         }
 
@@ -700,20 +722,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
     private function logAnalysisResult(FreshRSS_Entry $entry, array $analysis): void
     {
-        if ($analysis['label'] === FreshExtension_AutoFilter_Labels::NONE) {
-            return;
-        }
-
-        $contentPreview = substr(strip_tags($entry->content()), 0, 100);
-        if (strlen(strip_tags($entry->content())) > 100) {
-            $contentPreview .= '...';
-        }
-
         Minz_Log::warning(sprintf(
-            'AutoFilter: DETECTED Label=%s Confidence=%.2f Reason=%s Title="%s"',
-            $analysis['label'],
-            $analysis['confidence'],
-            $analysis['reason'],
+            'AutoFilter: Result Label=%s Confidence=%.2f Reason="%s" Title="%s"',
+            $analysis['label'] ?? 'N/A',
+            $analysis['confidence'] ?? 0.0,
+            $analysis['reason'] ?? 'N/A',
             substr($entry->title(), 0, 50)
         ));
     }
