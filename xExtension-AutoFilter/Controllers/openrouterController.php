@@ -643,9 +643,8 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             'X-Title: FreshRSS-AutoFilter',
         ];
         $data = [
-            'model'           => $this->model,
-            'messages'        => [['role' => 'user', 'content' => $prompt]],
-            'response_format' => ['type' => 'json_object'],
+            'model'    => $this->model,
+            'messages' => [['role' => 'user', 'content' => $prompt]],
         ];
 
         $ch = curl_init($url);
