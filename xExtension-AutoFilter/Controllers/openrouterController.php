@@ -647,10 +647,19 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             'messages' => [['role' => 'user', 'content' => $prompt]],
         ];
 
+        $payload = json_encode($data, JSON_UNESCAPED_UNICODE);
+        if ($payload === false) {
+            $jsonError = json_last_error_msg();
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Failed to encode JSON: ' . $jsonError);
+            }
+            return ['success' => false, 'error' => 'JSON encode error: ' . $jsonError];
+        }
+
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
@@ -670,6 +679,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             $msg = $this->getHttpErrorMessage($httpCode, $response);
             if ($this->enableLogging) {
                 Minz_Log::warning('AutoFilter: HTTP ' . $httpCode . ' — ' . $msg);
+                Minz_Log::warning('AutoFilter: Request payload: ' . substr($payload, 0, 500));
             }
             return ['success' => false, 'error' => $msg, 'http_code' => $httpCode];
         }
