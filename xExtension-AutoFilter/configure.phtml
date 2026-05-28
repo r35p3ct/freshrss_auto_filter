@@ -58,8 +58,14 @@ declare(strict_types=1);
     <div class="form-group">
         <label class="group-name" for="auto_filter_prompt"><?php echo _t('ext.field.prompt'); ?></label>
         <div class="group-controls">
-            <textarea id="auto_filter_prompt" name="auto_filter_prompt" rows="12"
-                      placeholder="<?php echo _t('ext.field.prompt_placeholder'); ?>"><?php echo htmlspecialchars($this->getSystemConfigurationValue('prompt') ?? '', ENT_QUOTES); ?></textarea>
+            <textarea id="auto_filter_prompt" name="auto_filter_prompt" rows="16"
+                      placeholder="<?php echo _t('ext.field.prompt_placeholder'); ?>"><?php
+                $currentPrompt = $this->getSystemConfigurationValue('prompt') ?? '';
+                if (empty($currentPrompt)) {
+                    $currentPrompt = FreshExtension_AutoFilter_openrouter_Controller::getDefaultPromptTemplate();
+                }
+                echo htmlspecialchars($currentPrompt, ENT_QUOTES);
+            ?></textarea>
             <p class="help">
                 <?php echo _t('ext.field.prompt_hint'); ?>
             </p>
