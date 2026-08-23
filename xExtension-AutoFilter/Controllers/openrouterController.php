@@ -15,6 +15,7 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 {
     private const MAX_CONTENT_LENGTH    = 2000;
     private const MAX_LOG_PROMPT_LENGTH = 200;
+    private const MAX_LOG_TITLE_LENGTH  = 150;
 
     // Используем константы из общего класса
     private const LABEL_NONE            = FreshExtension_AutoFilter_Labels::NONE;
@@ -475,31 +476,51 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         $author  = reset($authors) ?: '';
         $url     = $entry->link();
 
-        $promptTemplate = !empty($this->prompt) ? $this->prompt : self::getDefaultPromptTemplate();
+        $promptTemplate = !empty($this->prompt)
+            ? self::sanitizeStoredPrompt($this->prompt)
+            : self::getDefaultPromptTemplate();
 
         return str_replace(
             ['{title}', '{author}', '{url}', '{content}'],
             [$title,    $author,    $url,    $content],
             $promptTemplate
-        );
+        ) . "\n\nВАЖНО: Значение поля \"reason\" пиши строго НА РУССКОМ ЯЗЫКЕ. "
+        . 'Верни только чистый JSON без markdown и пояснений.';
+    }
+
+    /**
+     * Восстанавливает промпт, испорченный многократным HTML-экранированием
+     * (исторически Minz_Request::paramString кодировал кавычки в &quot; при каждом сохранении).
+     */
+    public static function sanitizeStoredPrompt(string $prompt): string
+    {
+        $decoded = $prompt;
+        for ($i = 0; $i < 10; $i++) {
+            $next = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($next === $decoded) {
+                break;
+            }
+            $decoded = $next;
+        }
+        return trim($decoded);
     }
 
     public static function getDefaultPromptTemplate(): string
     {
         return <<<'PROMPT'
-Ты должен определить, является ли следующая новостная запись рекламой.
+Ты должен определить, является ли следующая новостная запись рекламой или продвижением чужого телеграм-канала.
 
 ВЕРНИ ТОЛЬКО JSON БЕЗ ПОЯСНЕНИЙ В ТАКОМ ФОРМАТЕ:
 {
     "is_advertisement": true|false,
     "confidence": 0.0-1.0,
-    "reason": "краткое объяснение до 5 слов"
+    "reason": "краткое объяснение на русском языке до 5 слов"
 }
 
 КРИТЕРИИ РЕКЛАМЫ (is_advertisement = true):
 1. Коммерческое продвижение или продажа товара/услуги
-2. Призыв подписаться на другой канал/соцсеть (НЕ на автора)
-3. Заманивание бесплатными товарами/услугами для привлечения клиентов
+2. Призыв подписаться или перейти на ДРУГОЙ канал/соцсеть/чат (НЕ на автора самой записи), в том числе ссылки t.me на чужие каналы
+3. Заманивание бесплатными товарами/услугами для привлечения клиентов/подписчиков
 4. Сбор денег на покупку, лечение, помощь или отчет о сборе
 5. Бесплатное или платное обучение чему-то
 6. Призывы идти работать, служить в армию или еще куда-то
@@ -508,10 +529,10 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 
 НЕ РЕКЛАМА (is_advertisement = false):
 - Обычные новости и статьи
-- Призывы подписаться на того же автора
+- Призывы подписаться на свой канал (канал самой записи)
 - Личные мнения и блоги без коммерции
 
-УРОВНИ УВЕРЕННОСТИ:
+УРОВНИ УВЕРЕННОСТИ (насколько уверен, что это РЕКЛАМА):
 - 0.9-1.0: явная реклама с прямым призывом к покупке
 - 0.7-0.9: коммерческий контент с элементами продвижения
 - 0.4-0.7: подозрительный контент, но неясно
@@ -552,11 +573,19 @@ PROMPT;
             ];
         }
 
-        // Убираем markdown-обёртку, если модель вернула ```json ... ```
-        $cleaned = preg_replace('/^\s*```(?:json)?\s*|\s*```\s*$/i', '', $content);
+        // Убираем блоки размышлений и markdown-обёртку, если модель их вернула
+        $cleaned = preg_replace('/<think>.*?<\/think>/is', '', $content) ?? $content;
+        $cleaned = preg_replace('/^\s*```(?:json)?\s*|\s*```\s*$/i', '', $cleaned) ?? $cleaned;
         $cleaned = trim($cleaned);
 
         $json = json_decode($cleaned, true);
+
+        // Fallback: модель добавила текст вокруг JSON — извлекаем объект целиком
+        if (!is_array($json)) {
+            if (preg_match('/\{.*\}/s', $cleaned, $matches)) {
+                $json = json_decode($matches[0], true);
+            }
+        }
 
         if (!is_array($json) || !isset($json['is_advertisement'], $json['confidence'])) {
             Minz_Log::warning('AutoFilter: Failed to parse JSON: ' . substr($cleaned, 0, 200));
@@ -583,7 +612,11 @@ PROMPT;
 
     private function determineLabel(bool $isAd, float $confidence): string
     {
-        if ($isAd && $confidence >= $this->confidenceHigh) {
+        if (!$isAd) {
+            // AI явно ответил "не реклама" — уверенность означает уверенность в отсутствии рекламы
+            return self::LABEL_NONE;
+        }
+        if ($confidence >= $this->confidenceHigh) {
             return self::LABEL_ADVERTISEMENT;
         }
         if ($confidence >= $this->confidenceLow) {
@@ -641,6 +674,8 @@ PROMPT;
         ];
         $data = [
             'model'    => $this->model,
+            // Низкая температура: классификация должна быть детерминированной
+            'temperature' => 0.2,
             'messages' => [['role' => 'user', 'content' => $prompt]],
         ];
 
@@ -722,19 +757,32 @@ PROMPT;
     {
         Minz_Log::warning(sprintf(
             'AutoFilter: Processing title="%s"',
-            substr($entry->title(), 0, 50)
+            self::formatTitleForLog($entry)
         ));
     }
 
     private function logAnalysisResult(FreshRSS_Entry $entry, array $analysis): void
     {
         Minz_Log::warning(sprintf(
-            'AutoFilter: Result Label=%s Confidence=%.2f Reason="%s" Title="%s"',
+            'AutoFilter: Result Label=%s Ad=%s Confidence=%.2f Reason="%s" Title="%s"',
             $analysis['label'] ?? 'N/A',
+            !empty($analysis['is_advertisement']) ? 'yes' : 'no',
             $analysis['confidence'] ?? 0.0,
             $analysis['reason'] ?? 'N/A',
-            substr($entry->title(), 0, 50)
+            self::formatTitleForLog($entry)
         ));
+    }
+
+    /**
+     * Заголовок для лога: без обрыва многобайтовых символов UTF-8.
+     */
+    public static function formatTitleForLog(FreshRSS_Entry $entry): string
+    {
+        $title = trim(preg_replace('/\s+/u', ' ', (string)$entry->title()) ?? '');
+        if (mb_strlen($title) > self::MAX_LOG_TITLE_LENGTH) {
+            $title = mb_substr($title, 0, self::MAX_LOG_TITLE_LENGTH) . '…';
+        }
+        return $title;
     }
 
     public function invalidateCache(): void

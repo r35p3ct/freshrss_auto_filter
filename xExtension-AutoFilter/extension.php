@@ -44,13 +44,17 @@ class AutoFilterExtension extends Minz_Extension
                 'openrouter_model'            => Minz_Request::paramString('auto_filter_openrouter_model'),
                 'confidence_threshold_high'   => (float)Minz_Request::param('auto_filter_confidence_threshold_high', 0.8),
                 'confidence_threshold_low'    => (float)Minz_Request::param('auto_filter_confidence_threshold_low', 0.5),
-                'prompt'                      => Minz_Request::paramString('auto_filter_prompt'),
+                // plaintext=true: без HTML-экранирования, иначе кавычки в промпте превращаются в &quot; при каждом сохранении
+                'prompt'                      => trim(Minz_Request::paramString('auto_filter_prompt', true)),
                 'enable_logging'              => Minz_Request::paramString('auto_filter_enable_logging') === '1',
                 'channels_filter'             => $channelsFilter,
                 'background_mode'             => Minz_Request::paramString('auto_filter_background_mode') === '1',
                 'batch_size'                  => (int)Minz_Request::param('auto_filter_batch_size', 5),
                 'request_delay_ms'            => (int)Minz_Request::param('auto_filter_request_delay_ms', 2000),
             ];
+
+            // Заодно чиним промпт, если он был испорчен предыдущими сохранениями
+            $newConfig['prompt'] = FreshExtension_AutoFilter_openrouter_Controller::sanitizeStoredPrompt($newConfig['prompt']);
 
             // Сохраняем конфиг
             $this->setSystemConfiguration($newConfig);
@@ -138,7 +142,7 @@ class AutoFilterExtension extends Minz_Extension
         if ($enableLogging) {
             Minz_Log::warning(sprintf(
                 'AutoFilter: Hook entry_before_add fired — title="%s" feed=%s',
-                substr($entry->title(), 0, 50),
+                FreshExtension_AutoFilter_openrouter_Controller::formatTitleForLog($entry),
                 $entry->feedId()
             ));
         }
@@ -257,12 +261,12 @@ class AutoFilterExtension extends Minz_Extension
             Minz_Log::warning(sprintf(
                 'AutoFilter: Applied pending label (id=%d) to entry "%s"',
                 $pendingLabel->id(),
-                substr($entry->title(), 0, 50)
+                FreshExtension_AutoFilter_openrouter_Controller::formatTitleForLog($entry)
             ));
         } else {
             Minz_Log::warning(sprintf(
                 'AutoFilter: Entry "%s" already has pending label (id=%d)',
-                substr($entry->title(), 0, 50),
+                FreshExtension_AutoFilter_openrouter_Controller::formatTitleForLog($entry),
                 $pendingLabel->id()
             ));
         }
