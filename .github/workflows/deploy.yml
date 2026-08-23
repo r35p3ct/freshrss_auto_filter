@@ -6,6 +6,8 @@ on:
       - master
     paths:
       - 'xExtension-AutoFilter/**'
+      - 'xExtension-FilterTitle/**'
+      - '.github/workflows/deploy.yml'
   #workflow_dispatch:
 
 jobs:
@@ -18,15 +20,18 @@ jobs:
       - name: Prepare directory permissions
         run: |
           # Делаем пользователя dt владельцем, группу оставляем www-data
-          sudo chown -R dt:www-data /srv/freshrss/extensions/xExtension-AutoFilter
+          sudo chown -R dt:www-data /srv/freshrss/extensions/xExtension-AutoFilter /srv/freshrss/extensions/xExtension-FilterTitle
           # Даем полные права владельцу и группе, чтение остальным
-          sudo chmod -R 775 /srv/freshrss/extensions/xExtension-AutoFilter
+          sudo chmod -R 775 /srv/freshrss/extensions/xExtension-AutoFilter /srv/freshrss/extensions/xExtension-FilterTitle
 
       - name: Sync extension files
         run: |
           rsync -av --no-owner --no-group --delete \
             ./xExtension-AutoFilter/ \
             /srv/freshrss/extensions/xExtension-AutoFilter/
+          rsync -av --no-owner --no-group --delete \
+            ./xExtension-FilterTitle/ \
+            /srv/freshrss/extensions/xExtension-FilterTitle/
 
       - name: Restart FreshRSS container
         run: |
