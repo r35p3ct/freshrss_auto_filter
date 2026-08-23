@@ -1,0 +1,43 @@
+<?php
+    declare(strict_types=1);
+    /** @var FilterTitleExtension $this */
+?>
+<form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
+    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+
+    <div class="form-group">
+        <div class="group-controls">
+            <?php echo _t('ext.filter_title.keywords_desc'); ?>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="blacklist"><?php echo _t('ext.filter_title.blacklist'); ?></label>
+        <div class="group-controls">
+            <textarea name="blacklist" id="blacklist"><?php echo $this->getBlacklistData(); ?></textarea>
+            <br /><span><?php echo _t('ext.filter_title.priority_hint'); ?></span>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="whitelist"><?php echo _t('ext.filter_title.whitelist'); ?></label>
+        <div class="group-controls">
+            <textarea name="whitelist" id="whitelist"><?php echo $this->getWhitelistData(); ?></textarea>
+        </div>
+    </div>
+
+	<div class="form-group">
+		<label class="group-name" for="mark_as_read"><?= _t('ext.filter_title.mark_as_read') ?></label>
+		<div class="group-controls">
+			<input type="checkbox" name="mark_as_read" id="mark_as_read" value="1" <?= $this->getSystemConfigurationValue('mark_as_read') ? 'checked' : '' ?>>
+            <br /><span><?= _t('ext.filter_title.mark_as_read_hint') ?></span>
+		</div>
+	</div>
+
+    <div class="form-group form-actions">
+        <div class="group-controls">
+            <button type="submit" class="btn btn-important"><?php echo _t('gen.action.submit'); ?></button>
+            <button type="reset" class="btn"><?php echo _t('gen.action.cancel'); ?></button>
+        </div>
+    </div>
+</form>
