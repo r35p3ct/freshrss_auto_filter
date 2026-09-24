@@ -23,6 +23,8 @@ return [
         'channels_filter' => 'Channels for filtering',
         'channels_filter_hint' => 'Select channels for automatic advertisement filtering. If nothing is selected, all channels are checked.',
         'select_all_channels' => 'Select all channels',
+        'keywords_filter' => 'Keywords (pre-filter)',
+        'keywords_filter_hint' => 'If keywords are set, only entries containing at least one of them (in the title or text) are sent to AI; the rest are skipped without checking. If the list is empty, all entries of the selected channels are checked. One word or phrase per line (commas also work); matching is a case-insensitive substring search, so a word stem like "subscri" covers "subscribe" and "subscribed".',
         'background_mode' => 'Background checking mode',
         'background_mode_hint' => 'Check entries via a background script instead of on add',
         'background_mode_help' => 'During feed updates, new entries are tagged as "Pending" and added instantly. AI verification runs via a background script on a schedule. This eliminates delays when reading via API (CapyReader, etc.).',

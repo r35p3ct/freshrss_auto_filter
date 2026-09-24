@@ -7,7 +7,7 @@ require_once __DIR__ . '/Controllers/openrouterController.php';
 /**
  * Расширение AutoFilter для автоматической фильтрации рекламы через AI.
  *
- * @version 0.4.0
+ * @version 0.5.0
  */
 class AutoFilterExtension extends Minz_Extension
 {
@@ -38,6 +38,14 @@ class AutoFilterExtension extends Minz_Extension
             // Удаляем дубликаты и пустые значения
             $channelsFilter = array_values(array_unique(array_filter($channelsFilter)));
 
+            // Ключевые слова предварительного фильтра: по одному на строку, можно через запятую
+            $keywordsRaw = Minz_Request::paramString('auto_filter_keywords', true);
+            $keywordsFilter = preg_split('/[\r\n,]+/u', $keywordsRaw) ?: [];
+            $keywordsFilter = array_values(array_unique(array_filter(
+                array_map(static fn(string $w): string => trim($w), $keywordsFilter),
+                static fn(string $w): bool => $w !== ''
+            )));
+
             // Создаем новый конфиг
             $newConfig = [
                 'openrouter_api_key'          => Minz_Request::paramString('auto_filter_openrouter_api_key'),
@@ -48,6 +56,7 @@ class AutoFilterExtension extends Minz_Extension
                 'prompt'                      => trim(Minz_Request::paramString('auto_filter_prompt', true)),
                 'enable_logging'              => Minz_Request::paramString('auto_filter_enable_logging') === '1',
                 'channels_filter'             => $channelsFilter,
+                'keywords_filter'             => $keywordsFilter,
                 'background_mode'             => Minz_Request::paramString('auto_filter_background_mode') === '1',
                 'batch_size'                  => (int)Minz_Request::param('auto_filter_batch_size', 5),
                 'request_delay_ms'            => (int)Minz_Request::param('auto_filter_request_delay_ms', 2000),
@@ -189,6 +198,18 @@ class AutoFilterExtension extends Minz_Extension
             return $entry;
         }
 
+        // Предварительный фильтр: при заданных ключевых словах через AI проверяем
+        // только записи, содержащие хотя бы одно из них (в заголовке или тексте)
+        if (!$this->matchesKeywords($entry)) {
+            if ($enableLogging) {
+                Minz_Log::warning(sprintf(
+                    'AutoFilter: Entry skipped — no keywords match, title="%s"',
+                    FreshExtension_AutoFilter_openrouter_Controller::formatTitleForLog($entry)
+                ));
+            }
+            return $entry;
+        }
+
         // Фоновый режим: ставим метку "Непроверено" и пропускаем синхронную проверку
         if ($backgroundMode) {
             $this->applyPendingLabel($entry);
@@ -285,5 +306,31 @@ class AutoFilterExtension extends Minz_Extension
 
         $feedId = (string)$entry->feedId();
         return in_array($feedId, $channelsFilter, true);
+    }
+
+    /**
+     * @return bool true если ключевые слова не заданы (проверяем все записи)
+     *              или хотя бы одно из них найдено в заголовке/тексте записи
+     */
+    private function matchesKeywords(FreshRSS_Entry $entry): bool
+    {
+        $keywords = $this->getSystemConfigurationValue('keywords_filter');
+
+        if (empty($keywords) || !is_array($keywords)) {
+            return true;
+        }
+
+        // Поиск по вхождению без учёта регистра: одно короткое слово покрывает
+        // несколько словоформ русского языка (подписывайтесь/подписывайся/...)
+        $haystack = (string)$entry->title() . "\n" . strip_tags((string)$entry->content());
+
+        foreach ($keywords as $keyword) {
+            $keyword = trim((string)$keyword);
+            if ($keyword !== '' && mb_stripos($haystack, $keyword, 0, 'UTF-8') !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
