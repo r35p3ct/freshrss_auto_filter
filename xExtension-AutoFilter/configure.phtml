@@ -28,7 +28,8 @@ declare(strict_types=1);
                    value="<?php echo htmlspecialchars($this->getSystemConfigurationValue('openrouter_model') ?? 'openai/gpt-3.5-turbo', ENT_QUOTES); ?>"
                    placeholder="openai/gpt-3.5-turbo" />
             <p class="help">
-                Examples: openai/gpt-3.5-turbo, openai/gpt-4, anthropic/claude-3-haiku
+                Чат-модели: openai/gpt-3.5-turbo, openai/gpt-4o-mini.
+                Модели решений (System One): typesafe/jev-1.13 или ~typesafe/jev-latest — быстрее и дешевле, работают через отдельный API.
             </p>
         </div>
     </div>
@@ -38,20 +39,9 @@ declare(strict_types=1);
         <div class="group-controls">
             <input type="number" id="auto_filter_confidence_threshold_high"
                    name="auto_filter_confidence_threshold_high"
-                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('confidence_threshold_high') ?? 0.8), ENT_QUOTES); ?>"
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('confidence_threshold_high') ?? 0.7), ENT_QUOTES); ?>"
                    step="0.1" min="0" max="1" />
             <p class="help"><?php echo _t('ext.field.confidence_threshold_high_hint'); ?></p>
-        </div>
-    </div>
-
-    <div class="form-group">
-        <label class="group-name" for="auto_filter_confidence_threshold_low"><?php echo _t('ext.field.confidence_threshold_low'); ?></label>
-        <div class="group-controls">
-            <input type="number" id="auto_filter_confidence_threshold_low"
-                   name="auto_filter_confidence_threshold_low"
-                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('confidence_threshold_low') ?? 0.5), ENT_QUOTES); ?>"
-                   step="0.1" min="0" max="1" />
-            <p class="help"><?php echo _t('ext.field.confidence_threshold_low_hint'); ?></p>
         </div>
     </div>
 
@@ -120,8 +110,8 @@ declare(strict_types=1);
         <div class="group-controls">
             <input type="number" id="auto_filter_request_delay_ms"
                    name="auto_filter_request_delay_ms"
-                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('request_delay_ms') ?? 2000), ENT_QUOTES); ?>"
-                   min="0" max="60000" step="100" />
+                   value="<?php echo htmlspecialchars((string)($this->getSystemConfigurationValue('request_delay_ms') ?? 250), ENT_QUOTES); ?>"
+                   min="0" max="60000" step="50" />
             <p class="help"><?php echo _t('ext.field.request_delay_ms_hint'); ?></p>
         </div>
     </div>

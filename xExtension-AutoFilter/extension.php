@@ -7,7 +7,7 @@ require_once __DIR__ . '/Controllers/openrouterController.php';
 /**
  * Расширение AutoFilter для автоматической фильтрации рекламы через AI.
  *
- * @version 0.5.0
+ * @version 0.6.0
  */
 class AutoFilterExtension extends Minz_Extension
 {
@@ -50,8 +50,7 @@ class AutoFilterExtension extends Minz_Extension
             $newConfig = [
                 'openrouter_api_key'          => Minz_Request::paramString('auto_filter_openrouter_api_key'),
                 'openrouter_model'            => Minz_Request::paramString('auto_filter_openrouter_model'),
-                'confidence_threshold_high'   => (float)Minz_Request::param('auto_filter_confidence_threshold_high', 0.8),
-                'confidence_threshold_low'    => (float)Minz_Request::param('auto_filter_confidence_threshold_low', 0.5),
+                'confidence_threshold_high'   => (float)Minz_Request::param('auto_filter_confidence_threshold_high', 0.7),
                 // plaintext=true: без HTML-экранирования, иначе кавычки в промпте превращаются в &quot; при каждом сохранении
                 'prompt'                      => trim(Minz_Request::paramString('auto_filter_prompt', true)),
                 'enable_logging'              => Minz_Request::paramString('auto_filter_enable_logging') === '1',
@@ -109,7 +108,6 @@ class AutoFilterExtension extends Minz_Extension
             'openrouter_api_key'        => $this->getSystemConfigurationValue('openrouter_api_key'),
             'openrouter_model'          => $this->getSystemConfigurationValue('openrouter_model'),
             'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
-            'confidence_threshold_low'  => $this->getSystemConfigurationValue('confidence_threshold_low'),
             'prompt'                    => $this->getSystemConfigurationValue('prompt'),
             'enable_logging'            => $this->getSystemConfigurationValue('enable_logging'),
         ];
@@ -124,7 +122,6 @@ class AutoFilterExtension extends Minz_Extension
             'openrouter_api_key' => $this->getSystemConfigurationValue('openrouter_api_key'),
             'openrouter_model' => $this->getSystemConfigurationValue('openrouter_model'),
             'confidence_threshold_high' => $this->getSystemConfigurationValue('confidence_threshold_high'),
-            'confidence_threshold_low' => $this->getSystemConfigurationValue('confidence_threshold_low'),
             'prompt' => $this->getSystemConfigurationValue('prompt'),
             'enable_logging' => $this->getSystemConfigurationValue('enable_logging'),
             'batch_size' => $this->getSystemConfigurationValue('batch_size'),
@@ -227,10 +224,6 @@ class AutoFilterExtension extends Minz_Extension
 
         $controller = new FreshExtension_AutoFilter_openrouter_Controller($this->buildConfigArray());
         $result = $controller->analyzeEntryBeforeAdd($entry);
-
-        if ($enableLogging && !$result['success']) {
-            Minz_Log::warning('AutoFilter: Analysis failed — ' . ($result['error'] ?? 'unknown error'));
-        }
 
         return $entry;
     }

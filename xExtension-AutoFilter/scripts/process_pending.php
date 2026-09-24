@@ -157,7 +157,6 @@ foreach ($users as $user) {
         'openrouter_api_key'        => $extension->getSystemConfigurationValue('openrouter_api_key'),
         'openrouter_model'          => $extension->getSystemConfigurationValue('openrouter_model'),
         'confidence_threshold_high' => $extension->getSystemConfigurationValue('confidence_threshold_high'),
-        'confidence_threshold_low'  => $extension->getSystemConfigurationValue('confidence_threshold_low'),
         'prompt'                    => $extension->getSystemConfigurationValue('prompt'),
         'enable_logging'            => $extension->getSystemConfigurationValue('enable_logging'),
     ];

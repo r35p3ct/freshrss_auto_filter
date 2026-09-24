@@ -24,10 +24,22 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     private const LABEL_PENDING         = FreshExtension_AutoFilter_Labels::PENDING;
     private const LABEL_CHECKED         = FreshExtension_AutoFilter_Labels::CHECKED;
 
+    // Вопрос для моделей System One (TypeSafe Jev): бинарное решение "реклама/не реклама".
+    // Критерии синхронизированы с промтом по умолчанию для чат-моделей.
+    private const JEV_INSTRUCTIONS = 'Является ли эта запись рекламой или продвижением чужого канала, товара или услуги? '
+        . 'Призывы и ссылки, относящиеся к каналу-источнику самой записи (включая его зеркала в других мессенджерах), рекламой не считаются. '
+        . 'Рекламой считается запись, целиком или существенно посвящённая продвижению чужого канала, товара или услуги.';
+    private const JEV_CRITERIA_TRUE = 'Коммерческое продвижение или продажа конкретного товара, услуги, бренда или магазина; '
+        . 'призыв подписаться или перейти на другой канал/соцсеть (не на автора записи); заманивание бесплатными товарами/услугами '
+        . 'для привлечения клиентов/подписчиков; сбор денег на покупку, лечение, помощь или отчет о сборе; бесплатное или платное '
+        . 'обучение чему-то; призывы идти работать или служить; указаны реквизиты карт или номера телефонов; розыгрыши и бесплатные призы.';
+    private const JEV_CRITERIA_FALSE = 'Обычные новости и статьи; призывы подписаться на канал-источник самой записи или на его зеркало '
+        . 'в другом мессенджере (MAX, VK и т.п.); пост из одной картинки/видео со ссылкой только на канал-источник; общие советы, лайфхаки '
+        . 'и рекомендации без конкретного товара, бренда, магазина или ссылки на покупку; личные мнения и блоги без коммерции.';
+
     private string $apiKey;
     private string $model;
-    private float  $confidenceHigh;
-    private float  $confidenceLow;
+    private float  $confidenceThreshold;
     private string $prompt;
     private bool   $enableLogging;
 
@@ -36,12 +48,11 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      */
     public function __construct(array $config = [])
     {
-        $this->apiKey         = $this->validateApiKey($config['openrouter_api_key'] ?? '');
-        $this->model          = $this->validateModel($config['openrouter_model'] ?? 'openai/gpt-3.5-turbo');
-        $this->confidenceHigh = $this->validateThreshold($config['confidence_threshold_high'] ?? 0.8, 'high');
-        $this->confidenceLow  = $this->validateThreshold($config['confidence_threshold_low'] ?? 0.5, 'low');
-        $this->prompt         = $config['prompt'] ?? '';
-        $this->enableLogging  = !empty($config['enable_logging']);
+        $this->apiKey             = $this->validateApiKey($config['openrouter_api_key'] ?? '');
+        $this->model              = $this->validateModel($config['openrouter_model'] ?? 'openai/gpt-3.5-turbo');
+        $this->confidenceThreshold = $this->validateThreshold($config['confidence_threshold_high'] ?? 0.7);
+        $this->prompt             = $config['prompt'] ?? '';
+        $this->enableLogging      = !empty($config['enable_logging']);
 
         parent::__construct();
     }
@@ -70,14 +81,23 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     /**
      * @param mixed $value
      */
-    private function validateThreshold($value, string $type): float
+    private function validateThreshold($value): float
     {
         $f = (float)$value;
         if ($f < 0.0 || $f > 1.0) {
-            Minz_Log::warning('AutoFilter: Invalid confidence_threshold_' . $type . ' (' . $f . '), using default');
-            return $type === 'high' ? 0.8 : 0.5;
+            Minz_Log::warning('AutoFilter: Invalid confidence_threshold (' . $f . '), using default 0.7');
+            return 0.7;
         }
         return $f;
+    }
+
+    /**
+     * Модели System One (TypeSafe Jev) работают не через chat/completions,
+     * а через отдельный API структурированных решений.
+     */
+    private function isSystemOneModel(): bool
+    {
+        return stripos($this->model, 'jev-') !== false;
     }
 
     // -------------------------------------------------------------------------
@@ -90,7 +110,6 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
      *
      * Логика меток:
      *   LABEL_ADVERTISEMENT: метка + помечается прочитанной
-     *   LABEL_POSSIBLE:      только метка
      *   LABEL_NONE:          ничего не делаем
      *
      * @return array{success: bool, analysis?: array, error?: string}
@@ -101,46 +120,15 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return ['success' => false, 'error' => 'API key not configured'];
         }
 
-        $prompt = $this->buildPrompt($entry);
+        $result = $this->analyze($entry);
 
-        if ($this->enableLogging) {
-            $this->logPromptMetadata($entry, $prompt);
+        if ($result['success']) {
+            $this->applyLabelsToEntry($entry, $result['analysis']);
+        } elseif ($this->enableLogging) {
+            Minz_Log::warning('AutoFilter: Analysis failed — ' . ($result['error'] ?? 'unknown error'));
         }
 
-        $response = $this->callOpenRouter($prompt);
-
-        if (!$response['success']) {
-            return $response;
-        }
-
-        if (empty($response['content'])) {
-            $error = 'Empty response from AI service';
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: ' . $error);
-            }
-            return ['success' => false, 'error' => $error];
-        }
-
-        $analysis = $this->parseResponse($response['content']);
-
-        if ($this->enableLogging) {
-            $this->logAnalysisResult($entry, $analysis);
-        }
-
-        if (!isset($analysis['label'])) {
-            $error = 'Invalid analysis result';
-            if ($this->enableLogging) {
-                Minz_Log::warning('AutoFilter: ' . $error);
-            }
-            return ['success' => false, 'error' => $error];
-        }
-
-        $this->applyLabelsToEntry($entry, $analysis);
-
-        return [
-            'success'  => true,
-            'analysis' => $analysis,
-        ];
+        return $result;
     }
 
     // -------------------------------------------------------------------------
@@ -249,29 +237,70 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
             return ['success' => false, 'error' => 'API key not configured'];
         }
 
-        $prompt = $this->buildPrompt($entry);
+        $result = $this->analyze($entry);
 
-        if ($this->enableLogging) {
-            $this->logPromptMetadata($entry, $prompt);
+        if ($result['success']) {
+            $this->applyLabelsViaDao($entry, $result['analysis']);
+            $result['entry_id'] = $entry->id();
         }
 
-        $response = $this->callOpenRouter($prompt);
+        return $result;
+    }
 
-        if (!$response['success']) {
-            return $response;
+    /**
+     * Единая точка анализа: чат-модели идут через chat/completions с текстовым промтом,
+     * модели System One (TypeSafe Jev) — через API структурированных решений.
+     *
+     * @return array{success: bool, analysis?: array, error?: string}
+     */
+    private function analyze(FreshRSS_Entry $entry): array
+    {
+        if ($this->isSystemOneModel()) {
+            $response = $this->callSystemOne($entry);
+
+            if (!$response['success']) {
+                return $response;
+            }
+
+            $analysis = $this->parseSystemOneResponse($response['decoded']);
+        } else {
+            $prompt = $this->buildPrompt($entry);
+
+            if ($this->enableLogging) {
+                $this->logPromptMetadata($entry, $prompt);
+            }
+
+            $response = $this->callOpenRouter($prompt);
+
+            if (!$response['success']) {
+                return $response;
+            }
+
+            if (empty($response['content'])) {
+                $error = 'Empty response from AI service';
+                if ($this->enableLogging) {
+                    Minz_Log::warning('AutoFilter: ' . $error);
+                }
+                return ['success' => false, 'error' => $error];
+            }
+
+            $analysis = $this->parseResponse($response['content']);
         }
-
-        $analysis = $this->parseResponse($response['content']);
 
         if ($this->enableLogging) {
             $this->logAnalysisResult($entry, $analysis);
         }
 
-        $this->applyLabelsViaDao($entry, $analysis);
+        if (!isset($analysis['label'])) {
+            $error = 'Invalid analysis result';
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: ' . $error);
+            }
+            return ['success' => false, 'error' => $error];
+        }
 
         return [
             'success'  => true,
-            'entry_id' => $entry->id(),
             'analysis' => $analysis,
         ];
     }
@@ -542,6 +571,26 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
     }
 
     /**
+     * Структурированное состояние записи для System One API — вместо текстового промта.
+     *
+     * @return array<string, string>
+     */
+    private function buildState(FreshRSS_Entry $entry): array
+    {
+        $authors = $entry->authors();
+        $author  = reset($authors) ?: '';
+
+        return [
+            'title'          => (string)$entry->title(),
+            'author'         => (string)$author,
+            'url'            => (string)$entry->link(),
+            'content'        => $this->truncateContent(strip_tags((string)$entry->content())),
+            'source_channel' => self::resolveFeedName($entry),
+            'source_handle'  => self::resolveFeedHandle($entry),
+        ];
+    }
+
+    /**
      * Восстанавливает промпт, испорченный многократным HTML-экранированием
      * (исторически Minz_Request::paramString кодировал кавычки в &quot; при каждом сохранении).
      */
@@ -558,21 +607,27 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
         return trim($decoded);
     }
 
+    /**
+     * Универсальный промт для чат-моделей. Бинарная логика: "Реклама" или ничего —
+     * метка определяется порогом уверенности в коде, а не разделением по уровням.
+     */
     public static function getDefaultPromptTemplate(): string
     {
         return <<<'PROMPT'
-Ты должен определить, является ли следующая новостная запись рекламой или продвижением чужого телеграм-канала.
+Я подписан на новостные каналы, а также шуточные и политические.
+В некоторых из них есть рекламные записи, за которые автору платят рекламодатели.
+Ты должен определить, является ли следующая запись рекламой или продвижением.
 
 ВЕРНИ ТОЛЬКО JSON БЕЗ ПОЯСНЕНИЙ В ТАКОМ ФОРМАТЕ:
 {
     "is_advertisement": true|false,
     "confidence": 0.0-1.0,
-    "reason": "краткое объяснение на русском языке до 5 слов"
+    "reason": "краткое объяснение НА РУССКОМ ЯЗЫКЕ, до 5 слов"
 }
 
-        КРИТЕРИИ РЕКЛАМЫ (is_advertisement = true):
+КРИТЕРИИ РЕКЛАМЫ (is_advertisement = true):
 1. Коммерческое продвижение или продажа КОНКРЕТНОГО товара, услуги, бренда или магазина
-2. Призыв подписаться или перейти на ДРУГОЙ канал/соцсеть/чат (НЕ на автора самой записи), в том числе ссылки t.me на чужие каналы
+2. Призыв подписаться или перейти на другой канал/соцсеть (НЕ на автора)
 3. Заманивание бесплатными товарами/услугами для привлечения клиентов/подписчиков
 4. Сбор денег на покупку, лечение, помощь или отчет о сборе
 5. Бесплатное или платное обучение чему-то
@@ -583,21 +638,15 @@ class FreshExtension_AutoFilter_openrouter_Controller extends FreshRSS_ActionCon
 НЕ РЕКЛАМА (is_advertisement = false):
 - Обычные новости и статьи
 - Призывы подписаться на свой канал (канал самой записи)
-- Призыв подписаться на зеркало ЭТОГО ЖЕ канала в другом мессенджере (MAX, VK и т.п.), даже если приписка в конце поста
 - Пост из одной картинки/видео со ссылкой только на канал-источник, без рекламного текста
 - Общие советы, лайфхаки и рекомендации без указания конкретного товара, бренда, магазина или ссылки на покупку
+- Призыв подписаться на зеркало ЭТОГО ЖЕ канала в другом мессенджере (MAX, VK и т.п.)
 - Личные мнения и блоги без коммерции
 
 ПРИНЦИП: рекламой считай только ЯВНОЕ продвижение ЧУЖОГО канала/товара (чужое название, @ник, бренд).
 Рекламные записи обычно содержат несколько предложений убеждающего текста; короткая ссылка или приписка на канал-источник рекламой НЕ является.
 Новостной пост с короткой припиской-приглашением в мессенджер-зеркало (MAX, VK и т.п.) — НЕ реклама; рекламой считается пост, ЦЕЛИКОМ посвящённый продвижению чужого канала.
-Если сомневаешься — отвечай is_advertisement = false с низкой confidence.
-
-УРОВНИ УВЕРЕННОСТИ (насколько уверен, что это РЕКЛАМА):
-- 0.9-1.0: явная реклама с прямым призывом к покупке
-- 0.7-0.9: коммерческий контент с элементами продвижения
-- 0.4-0.7: подозрительный контент, но неясно
-- 0.0-0.3: точно не реклама
+Если сомневаешься — отвечай is_advertisement = false с низкой уверенностью.
 
 КОНТЕКСТ ЗАПИСИ:
 - Заголовок: {title}
@@ -671,29 +720,80 @@ PROMPT;
         ];
     }
 
+    /**
+     * Ответ System One модели: калиброванная вероятность noul (0..1) вместо сгенерированного JSON.
+     * noul >= 0.5 трактуется как "реклама"; метка "Реклама" ставится с учётом порога уверенности.
+     *
+     * @param array<string, mixed> $decoded
+     * @return array{is_advertisement: bool, confidence: float, reason: string, label: string}
+     */
+    private function parseSystemOneResponse(array $decoded): array
+    {
+        $noul = $decoded['answers']['is_advertisement']['noul'] ?? null;
+
+        if (!is_numeric($noul)) {
+            Minz_Log::warning('AutoFilter: System One response missing noul answer');
+            return [
+                'is_advertisement' => false,
+                'confidence'       => 0.0,
+                'reason'           => 'Invalid System One response',
+                'label'            => self::LABEL_NONE,
+            ];
+        }
+
+        $confidence = max(0.0, min(1.0, (float)$noul));
+        $isAd       = $confidence >= 0.5;
+        $label      = $this->determineLabel($isAd, $confidence);
+
+        return [
+            'is_advertisement' => $isAd,
+            'confidence'       => $confidence,
+            'reason'           => 'Вероятность рекламы ' . sprintf('%.2f', $confidence) . ' (System One)',
+            'label'            => $label,
+        ];
+    }
+
     private function determineLabel(bool $isAd, float $confidence): string
     {
-        if (!$isAd) {
-            // AI явно ответил "не реклама" — уверенность означает уверенность в отсутствии рекламы
+        // Бинарная логика: метка "Реклама" или ничего. Порог страхует от слабых
+        // моделей: is_advertisement=true с уверенностью ниже порога не меткует запись.
+        if (!$isAd || $confidence < $this->confidenceThreshold) {
             return self::LABEL_NONE;
         }
-        if ($confidence >= $this->confidenceHigh) {
-            return self::LABEL_ADVERTISEMENT;
-        }
-        if ($confidence >= $this->confidenceLow) {
-            return self::LABEL_POSSIBLE;
-        }
-        return self::LABEL_NONE;
+        return self::LABEL_ADVERTISEMENT;
     }
 
     // -------------------------------------------------------------------------
-    // Вызов OpenRouter API
+    // Вызов OpenRouter API (chat/completions) и System One API (решения)
     // -------------------------------------------------------------------------
 
     /**
+     * Вызов OpenRouter chat/completions с повторными попытками при rate limit
+     *
      * @return array{success: bool, content?: string, error?: string, http_code?: int}
      */
     private function callOpenRouter(string $prompt): array
+    {
+        return $this->callWithRetry(fn(): array => $this->callOpenRouterOnce($prompt));
+    }
+
+    /**
+     * Вызов System One API с повторными попытками при rate limit
+     *
+     * @return array{success: bool, decoded?: array, error?: string, http_code?: int}
+     */
+    private function callSystemOne(FreshRSS_Entry $entry): array
+    {
+        return $this->callWithRetry(fn(): array => $this->callSystemOneOnce($entry));
+    }
+
+    /**
+     * Повторные попытки при упоре в rate limit (HTTP 429)
+     *
+     * @param callable(): array{success: bool, error?: string, http_code?: int} $once
+     * @return array{success: bool, error?: string, http_code?: int}
+     */
+    private function callWithRetry(callable $once): array
     {
         $maxRetries = 2;
         $attempt    = 0;
@@ -701,7 +801,7 @@ PROMPT;
         while (true) {
             $attempt++;
 
-            $result = $this->callOpenRouterOnce($prompt);
+            $result = $once();
 
             if ($result['success'] || ($result['http_code'] ?? 0) !== 429) {
                 return $result;
@@ -786,6 +886,84 @@ PROMPT;
         }
 
         return ['success' => true, 'content' => $decoded['choices'][0]['message']['content']];
+    }
+
+    /**
+     * Единичный вызов System One API (структурные решения) без повторных попыток.
+     * Модель не генерирует текст: возвращает калиброванную вероятность по вопросу.
+     *
+     * @return array{success: bool, decoded?: array, error?: string, http_code?: int}
+     */
+    private function callSystemOneOnce(FreshRSS_Entry $entry): array
+    {
+        $url     = 'https://openrouter.ai/api/v1/systemone';
+        $headers = [
+            'Authorization: Bearer ' . $this->apiKey,
+            'Content-Type: application/json',
+            'HTTP-Referer: ' . ($_SERVER['HTTP_HOST'] ?? 'localhost'),
+            'X-Title: FreshRSS-AutoFilter',
+        ];
+        $data = [
+            'model'     => $this->model,
+            'state'     => $this->buildState($entry),
+            'questions' => [
+                'is_advertisement' => [
+                    'type'         => 'noul',
+                    'instructions' => self::JEV_INSTRUCTIONS,
+                    'criteria'     => [
+                        'true'  => self::JEV_CRITERIA_TRUE,
+                        'false' => self::JEV_CRITERIA_FALSE,
+                    ],
+                ],
+            ],
+        ];
+
+        $payload = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($payload === false) {
+            $jsonError = json_last_error_msg();
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Failed to encode JSON: ' . $jsonError);
+            }
+            return ['success' => false, 'error' => 'JSON encode error: ' . $jsonError];
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error    = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: CURL error: ' . $error);
+            }
+            return ['success' => false, 'error' => 'CURL error: ' . $error];
+        }
+
+        if ($httpCode !== 200) {
+            $msg = $this->getHttpErrorMessage($httpCode, $response);
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: HTTP ' . $httpCode . ' — ' . $msg);
+                Minz_Log::warning('AutoFilter: Request payload: ' . substr($payload, 0, 500));
+            }
+            return ['success' => false, 'error' => $msg, 'http_code' => $httpCode];
+        }
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded)) {
+            if ($this->enableLogging) {
+                Minz_Log::warning('AutoFilter: Invalid System One response: ' . substr((string)$response, 0, 200));
+            }
+            return ['success' => false, 'error' => 'Invalid System One response'];
+        }
+
+        return ['success' => true, 'decoded' => $decoded];
     }
 
     private function getHttpErrorMessage(int $httpCode, string $response): string
